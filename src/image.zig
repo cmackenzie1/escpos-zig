@@ -157,6 +157,49 @@ pub fn scale(allocator: Allocator, src: Gray, new_width: u32) ParseError!Gray {
     return .{ .width = new_width, .height = new_height, .pixels = out };
 }
 
+/// Stretch the tonal range in place so the darkest 1% of pixels map to black
+/// and the lightest 1% to white. Washed-out sources come out punchier, which
+/// matters because 1-bit printing turns light grays into a few scattered dots.
+/// Images that already span the range, or are nearly flat, are left alone.
+pub fn autoLevels(img: Gray) void {
+    var hist: [256]u32 = @splat(0);
+    for (img.pixels) |v| hist[v] += 1;
+    const cut = @as(u64, img.pixels.len) / 100;
+
+    var low: usize = 0;
+    var seen: u64 = 0;
+    while (low < 255) : (low += 1) {
+        seen += hist[low];
+        if (seen > cut) break;
+    }
+    var high: usize = 255;
+    seen = 0;
+    while (high > 0) : (high -= 1) {
+        seen += hist[high];
+        if (seen > cut) break;
+    }
+    if (high <= low or high - low < 16 or (low == 0 and high == 255)) return;
+
+    var lut: [256]u8 = undefined;
+    for (&lut, 0..) |*out, v| {
+        const clamped = std.math.clamp(v, low, high);
+        out.* = @intCast((clamped - low) * 255 / (high - low));
+    }
+    for (img.pixels) |*v| v.* = lut[v.*];
+}
+
+/// Apply a gamma curve in place. Values above 1 darken midtones (more ink),
+/// values below 1 lighten them; 1 changes nothing.
+pub fn adjustGamma(img: Gray, gamma: f32) void {
+    if (gamma == 1 or !(gamma > 0)) return;
+    var lut: [256]u8 = undefined;
+    for (&lut, 0..) |*out, v| {
+        const f = std.math.pow(f32, @as(f32, @floatFromInt(v)) / 255, gamma);
+        out.* = @intFromFloat(@round(std.math.clamp(f, 0, 1) * 255));
+    }
+    for (img.pixels) |*v| v.* = lut[v.*];
+}
+
 /// Reduce to 1 bit: pixels darker than `level` print black. Caller owns the
 /// result.
 pub fn threshold(allocator: Allocator, src: Gray, level: u8) Allocator.Error!Bitmap {
@@ -289,4 +332,35 @@ test "scale averages when shrinking" {
     try std.testing.expectEqual(2, out.width);
     try std.testing.expectEqual(1, out.height);
     try std.testing.expectEqualSlices(u8, &.{ 50, 150 }, out.pixels);
+}
+
+test "autoLevels stretches a washed-out image" {
+    var px: [100]u8 = undefined;
+    for (&px, 0..) |*v, i| v.* = @intCast(100 + i); // 100..199
+    autoLevels(.{ .width = 100, .height = 1, .pixels = &px });
+    try std.testing.expect(px[0] < 5);
+    try std.testing.expect(px[99] > 250);
+    try std.testing.expect(std.sort.isSorted(u8, &px, {}, std.sort.asc(u8)));
+}
+
+test "autoLevels leaves full-range and flat images alone" {
+    var full = [_]u8{ 0, 100, 255 };
+    autoLevels(.{ .width = 3, .height = 1, .pixels = &full });
+    try std.testing.expectEqualSlices(u8, &.{ 0, 100, 255 }, &full);
+
+    var flat: [64]u8 = @splat(200);
+    autoLevels(.{ .width = 8, .height = 8, .pixels = &flat });
+    try std.testing.expectEqual(200, flat[0]);
+}
+
+test "gamma darkens above 1 and keeps the endpoints" {
+    var px = [_]u8{ 0, 128, 255 };
+    adjustGamma(.{ .width = 3, .height = 1, .pixels = &px }, 2);
+    try std.testing.expectEqual(0, px[0]);
+    try std.testing.expect(px[1] < 70);
+    try std.testing.expectEqual(255, px[2]);
+
+    var same = [_]u8{ 10, 20 };
+    adjustGamma(.{ .width = 2, .height = 1, .pixels = &same }, 1);
+    try std.testing.expectEqualSlices(u8, &.{ 10, 20 }, &same);
 }
