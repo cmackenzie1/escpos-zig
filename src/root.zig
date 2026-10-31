@@ -12,6 +12,10 @@ pub const image = @import("image.zig");
 
 /// UTF-8 to printer code page conversion tables.
 pub const encoding = @import("encoding.zig");
+
+/// Real-time status decoding for `Printer.queryStatus`.
+pub const status = @import("status.zig");
+pub const Status = status.Status;
 pub const Encoding = encoding.Encoding;
 
 /// ESC control byte, the prefix of most ESC/POS commands.
@@ -247,6 +251,29 @@ pub const Printer = struct {
             .partial => 66,
         };
         try self.writer.writeAll(&.{ gs, 'V', m, 3 });
+    }
+
+    /// DLE EOT n - ask the printer for one real-time status byte. The reply
+    /// arrives on the connection's read side; most callers want `queryStatus`.
+    pub fn requestStatus(self: Printer, kind: status.Kind) Io.Writer.Error!void {
+        try self.writer.writeAll(&.{ status.dle, status.eot, @backingInt(kind) });
+    }
+
+    /// Ask the printer for all four status bytes and decode them.
+    ///
+    /// `reader` must read from the same connection the printer writes to.
+    /// Each request is flushed and then waits for the reply, and a printer
+    /// that doesn't answer blocks forever (a write-only device file never
+    /// will), so open the connection read-write and use this only on
+    /// bidirectional links.
+    pub fn queryStatus(self: Printer, reader: *Io.Reader) (status.ParseError || Io.Reader.Error || Io.Writer.Error)!Status {
+        var replies: [4]u8 = undefined;
+        inline for (.{ status.Kind.printer, .offline_cause, .error_cause, .paper }, 0..) |kind, i| {
+            try self.requestStatus(kind);
+            try self.writer.flush();
+            replies[i] = try reader.takeByte();
+        }
+        return status.parse(replies[0], replies[1], replies[2], replies[3]);
     }
 
     /// ESC t - select the code page for bytes 0x80-0xFF. Pair with
@@ -662,4 +689,28 @@ test "textUtf8 replaces unmappable and invalid input" {
 
 test {
     _ = encoding;
+}
+
+test "requestStatus" {
+    try expectBytes("\x10\x04\x04", Printer.requestStatus, .{status.Kind.paper});
+}
+
+test "queryStatus sends four requests and decodes the replies" {
+    var out: [16]u8 = undefined;
+    var w: Io.Writer = .fixed(&out);
+    var r: Io.Reader = .fixed(&.{ 0x12, 0x12 | 0x04, 0x12, 0x12 | 0x60 });
+    const s = try Printer.init(&w).queryStatus(&r);
+    try std.testing.expectEqualSlices(u8, "\x10\x04\x01\x10\x04\x02\x10\x04\x03\x10\x04\x04", w.buffered());
+    try std.testing.expect(s.cover_open and s.paper_end and !s.offline);
+}
+
+test "queryStatus fails when the printer stops answering" {
+    var out: [16]u8 = undefined;
+    var w: Io.Writer = .fixed(&out);
+    var r: Io.Reader = .fixed(&.{0x12});
+    try std.testing.expectError(error.EndOfStream, Printer.init(&w).queryStatus(&r));
+}
+
+test {
+    _ = status;
 }

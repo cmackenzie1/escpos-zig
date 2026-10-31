@@ -39,6 +39,7 @@ const usage =
     \\      --image-width <n> Scale the image to n dots wide (default: at most 576)
     \\      --image-mode <m>  dither | threshold (default: dither)
     \\      --demo            Print a sample receipt showing most features
+    \\      --status          Query and print the printer's status; exit 1 if not ready
     \\      --stdout          Write raw ESC/POS bytes to stdout instead
     \\  -h, --help            Show this help
     \\
@@ -69,6 +70,7 @@ pub fn main(init: std.process.Init) !void {
     var to_stdout = false;
     var run_demo = false;
     var qr: ?[]const u8 = null;
+    var show_status = false;
     var encoding: ?escpos.Encoding = .cp858;
     var line_spacing: ?u8 = null;
     var char_spacing: u8 = 0;
@@ -108,6 +110,8 @@ pub fn main(init: std.process.Init) !void {
         } else if (eql(a, "-n") or eql(a, "--feed")) {
             const v = try value(args, &i, err);
             feed = std.fmt.parseInt(u8, v, 10) catch return fail(err, "invalid feed: {s}", .{v});
+        } else if (eql(a, "--status")) {
+            show_status = true;
         } else if (eql(a, "--encoding")) {
             const v = try value(args, &i, err);
             encoding = if (eql(v, "raw")) null else std.meta.stringToEnum(escpos.Encoding, v) orelse
@@ -178,6 +182,11 @@ pub fn main(init: std.process.Init) !void {
         } else {
             try words.append(arena, a);
         }
+    }
+
+    if (show_status) {
+        if (to_stdout) return fail(err, "--status needs a printer, not --stdout", .{});
+        return printStatus(io, device, err);
     }
 
     if (qr) |data| if (data.len == 0 or data.len > 7089) return fail(err, "QR data must be 1-7089 bytes", .{});
@@ -271,6 +280,31 @@ pub fn main(init: std.process.Init) !void {
         try p.cut(.partial);
     } else try p.feed(feed);
     try file_writer.interface.flush();
+}
+
+/// Open the printer read-write, query it and report. Exits 1 if it isn't ready.
+fn printStatus(io: Io, device: []const u8, err: *Io.Writer) !void {
+    const file = Io.Dir.openFileAbsolute(io, device, .{ .mode = .read_write }) catch |e|
+        return fail(err, "cannot open {s}: {s}", .{ device, @errorName(e) });
+    defer file.close(io);
+
+    var out_buf: [64]u8 = undefined;
+    var file_writer: Io.File.Writer = .init(file, io, &out_buf);
+    var in_buf: [16]u8 = undefined;
+    var file_reader: Io.File.Reader = .initStreaming(file, io, &in_buf);
+
+    const st = escpos.Printer.init(&file_writer.interface).queryStatus(&file_reader.interface) catch |e|
+        return fail(err, "cannot read status from {s}: {s}", .{ device, @errorName(e) });
+
+    var stdout_buf: [512]u8 = undefined;
+    var stdout_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buf);
+    const out = &stdout_writer.interface;
+    try out.print("{s}\n", .{if (st.ready()) "ready" else "not ready"});
+    inline for (comptime std.meta.fieldNames(escpos.Status)) |name| {
+        if (@field(st, name)) try out.print("  {s}\n", .{name});
+    }
+    try out.flush();
+    if (!st.ready()) std.process.exit(1);
 }
 
 fn eql(a: []const u8, b: []const u8) bool {

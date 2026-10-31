@@ -34,7 +34,8 @@ other ESC/POS compatible printers (Epson TM-T88, TM-T20, and many generic
 - Command-line tool: print text from arguments or stdin
 - Zero dependencies, no libusb; cross-compiles to a static binary for arm64
   and other Linux targets
-- Not yet supported: printer status queries
+- Printer status queries (paper out, cover open, errors) over a bidirectional
+  connection
 
 ## Installation
 
@@ -103,6 +104,7 @@ no libusb is needed. You may need to join the `lp` group to access it.
 escpos "Hello, world"
 echo "From stdin" | escpos
 escpos -a center -b -s 2 "RECEIPT"
+escpos --status                                  # needs a readable device; exits 1 if not ready
 escpos "Café €4,50"                              # UTF-8 is converted to PC858
 escpos --left-margin 96 --char-spacing 2 --line-spacing 40 "Spaced out"
 escpos --qr https://example.com "Scan me"
