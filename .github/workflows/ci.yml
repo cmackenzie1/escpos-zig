@@ -13,40 +13,21 @@ permissions:
   contents: read
 
 jobs:
-  fmt:
+  ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-zig
       - run: zig fmt --check .
-
-  test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-zig
       - run: zig build test --summary all
-
-  build:
-    needs: [fmt, test]
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - x86_64-linux-musl
-          - aarch64-linux-musl
-          - arm-linux-musleabihf
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-zig
-      - run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall --summary all
+      # Zig cross-compiles out of the box, so one runner covers every target.
+      - name: Cross-compile
+        run: |
+          for target in x86_64-linux-musl aarch64-linux-musl arm-linux-musleabihf x86_64-macos aarch64-macos x86_64-windows; do
+            zig build -Dtarget=$target -Doptimize=ReleaseSmall -p dist/$target --summary all
+          done
       - uses: actions/upload-artifact@v4
         with:
-          name: escpos-${{ matrix.target }}
-          path: zig-out/bin/escpos
+          name: escpos
+          path: dist/*/bin/*
           if-no-files-found: error
