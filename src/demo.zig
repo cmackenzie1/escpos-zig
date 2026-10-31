@@ -15,7 +15,7 @@ const items = [_]Item{
 };
 
 /// Print the demo receipt. The caller is responsible for flushing the writer.
-pub fn print(p: escpos.Printer) Io.Writer.Error!void {
+pub fn print(p: escpos.Printer) (escpos.BarcodeError || Io.Writer.Error)!void {
     try p.initialize();
     // WPC1252, so the accented e below prints correctly.
     try p.setCodePage(16);
@@ -74,6 +74,13 @@ pub fn print(p: escpos.Printer) Io.Writer.Error!void {
     // QR code
     try p.line("Scan for the source:");
     try p.qrCode("https://ziglang.org", 6);
+    try p.feed(1);
+
+    // Barcodes
+    try p.line("Order barcode:");
+    try p.barcode(.code128, "ZIG-0042", .{});
+    try p.feed(1);
+    try p.barcode(.ean13, "4006381333931", .{ .height = 60 });
     try p.feed(1);
 
     // Footer

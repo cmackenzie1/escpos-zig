@@ -19,6 +19,12 @@ const usage =
     \\  -n, --feed <n>        Blank lines to feed before cutting (default: 3)
     \\      --no-cut          Do not cut the paper
     \\      --qr <data>       Print a QR code after the text
+    \\      --barcode <data>  Print a 1D barcode after the text
+    \\      --barcode-type <t>    upca | upce | ean13 | ean8 | code39 | itf |
+    \\                            codabar | code93 | code128 (default: code128)
+    \\      --barcode-height <n>  Bar height in dots, 1-255 (default: 80)
+    \\      --barcode-width <n>   Narrowest bar width in dots, 2-6 (default: 2)
+    \\      --barcode-text <t>    none | above | below | both (default: below)
     \\      --demo            Print a sample receipt showing most features
     \\      --stdout          Write raw ESC/POS bytes to stdout instead
     \\  -h, --help            Show this help
@@ -47,6 +53,9 @@ pub fn main(init: std.process.Init) !void {
     var to_stdout = false;
     var run_demo = false;
     var qr: ?[]const u8 = null;
+    var barcode: ?[]const u8 = null;
+    var barcode_type: escpos.BarcodeType = .code128;
+    var barcode_opts: escpos.BarcodeOptions = .{};
     var words: std.ArrayList([]const u8) = .empty;
 
     var i: usize = 1;
@@ -76,6 +85,22 @@ pub fn main(init: std.process.Init) !void {
             cut = false;
         } else if (eql(a, "--qr")) {
             qr = try value(args, &i, err);
+        } else if (eql(a, "--barcode")) {
+            barcode = try value(args, &i, err);
+        } else if (eql(a, "--barcode-type")) {
+            const v = try value(args, &i, err);
+            barcode_type = std.meta.stringToEnum(escpos.BarcodeType, v) orelse return fail(err, "invalid barcode type: {s}", .{v});
+        } else if (eql(a, "--barcode-height")) {
+            const v = try value(args, &i, err);
+            barcode_opts.height = std.fmt.parseInt(u8, v, 10) catch return fail(err, "invalid barcode height: {s}", .{v});
+            if (barcode_opts.height < 1) return fail(err, "barcode height must be 1-255", .{});
+        } else if (eql(a, "--barcode-width")) {
+            const v = try value(args, &i, err);
+            barcode_opts.module_width = std.fmt.parseInt(u8, v, 10) catch return fail(err, "invalid barcode width: {s}", .{v});
+            if (barcode_opts.module_width < 2 or barcode_opts.module_width > 6) return fail(err, "barcode width must be 2-6", .{});
+        } else if (eql(a, "--barcode-text")) {
+            const v = try value(args, &i, err);
+            barcode_opts.text = std.meta.stringToEnum(escpos.BarcodeText, v) orelse return fail(err, "invalid barcode text: {s}", .{v});
         } else if (eql(a, "--demo")) {
             run_demo = true;
         } else if (eql(a, "--stdout")) {
@@ -86,6 +111,9 @@ pub fn main(init: std.process.Init) !void {
             try words.append(arena, a);
         }
     }
+
+    if (barcode) |data| escpos.validateBarcode(barcode_type, data) catch
+        return fail(err, "invalid data for barcode type {s}: {s}", .{ @tagName(barcode_type), data });
 
     // Gather the body before touching the printer.
     const body: []const u8 = if (run_demo)
@@ -128,6 +156,11 @@ pub fn main(init: std.process.Init) !void {
     if (qr) |data| {
         try p.setAlign(.center);
         try p.qrCode(data, 6);
+        try p.text("\n");
+    }
+    if (barcode) |data| {
+        try p.setAlign(.center);
+        try p.barcode(barcode_type, data, barcode_opts);
         try p.text("\n");
     }
     if (cut) {

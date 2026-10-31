@@ -46,6 +46,55 @@ pub const CutMode = enum {
     partial,
 };
 
+/// 1D barcode symbology (GS k, function B).
+pub const BarcodeType = enum(u8) {
+    /// 11-12 digits; the printer computes the check digit if it is omitted.
+    upca = 65,
+    /// 6-8, 11 or 12 digits.
+    upce = 66,
+    /// 12-13 digits; the printer computes the check digit if it is omitted.
+    ean13 = 67,
+    /// 7-8 digits; the printer computes the check digit if it is omitted.
+    ean8 = 68,
+    /// Digits, A-Z, space and `$ % + - . /`, optionally wrapped in `*`.
+    code39 = 69,
+    /// Interleaved 2 of 5: an even number of digits.
+    itf = 70,
+    /// Digits and `$ + - . / :`, starting and ending with A-D (or a-d).
+    codabar = 71,
+    /// Any ASCII byte (0-127).
+    code93 = 72,
+    /// Printable ASCII. Without a leading `{A`, `{B` or `{C` code set
+    /// selector, `{B` is prepended automatically.
+    code128 = 73,
+};
+
+/// Where the human-readable text is printed relative to a barcode.
+pub const BarcodeText = enum(u8) {
+    none = 0,
+    above = 1,
+    below = 2,
+    both = 3,
+};
+
+/// Appearance of a 1D barcode.
+pub const BarcodeOptions = struct {
+    /// Bar height in dots (1-255). 80 dots is about 10mm at 203 dpi.
+    height: u8 = 80,
+    /// Width of the narrowest bar in dots (2-6). Wide data at larger widths
+    /// can exceed the paper width, in which case the printer prints nothing.
+    module_width: u8 = 2,
+    /// Placement of the human-readable text.
+    text: BarcodeText = .below,
+    /// Font of the human-readable text.
+    font: Font = .a,
+};
+
+pub const BarcodeError = error{
+    /// The data is not valid for the chosen `BarcodeType`.
+    InvalidBarcode,
+};
+
 /// Characters per line on 80mm paper in Font A.
 pub const columns_font_a = 48;
 /// Characters per line on 80mm paper in Font B.
@@ -172,7 +221,74 @@ pub const Printer = struct {
         // Print stored symbol
         try w.writeAll(&.{ gs, '(', 'k', 3, 0, 49, 81, 48 });
     }
+
+    /// Print a 1D barcode (GS h, w, H, f, then GS k function B).
+    ///
+    /// Nothing is written if `data` is invalid for `kind`.
+    pub fn barcode(self: Printer, kind: BarcodeType, data: []const u8, opts: BarcodeOptions) (BarcodeError || Io.Writer.Error)!void {
+        try validateBarcode(kind, data);
+        const w = self.writer;
+        try w.writeAll(&.{ gs, 'h', @max(opts.height, 1) });
+        try w.writeAll(&.{ gs, 'w', std.math.clamp(opts.module_width, 2, 6) });
+        try w.writeAll(&.{ gs, 'H', @backingInt(opts.text) });
+        try w.writeAll(&.{ gs, 'f', @backingInt(opts.font) });
+        const prefix = code128Prefix(kind, data);
+        try w.writeAll(&.{ gs, 'k', @backingInt(kind), @intCast(prefix.len + data.len) });
+        try w.writeAll(prefix);
+        try w.writeAll(data);
+    }
 };
+
+/// Check that `data` can be encoded as `kind`, without writing anything.
+pub fn validateBarcode(kind: BarcodeType, data: []const u8) BarcodeError!void {
+    const n = data.len;
+    const ok = switch (kind) {
+        .upca => (n == 11 or n == 12) and allDigits(data),
+        .upce => (n == 6 or n == 7 or n == 8 or n == 11 or n == 12) and allDigits(data),
+        .ean13 => (n == 12 or n == 13) and allDigits(data),
+        .ean8 => (n == 7 or n == 8) and allDigits(data),
+        .code39 => n >= 1 and n <= 255 and allIn(data, isCode39),
+        .itf => n >= 2 and n <= 254 and n % 2 == 0 and allDigits(data),
+        .codabar => n >= 2 and n <= 255 and allIn(data, isCodabar) and isCodabarStop(data[0]) and isCodabarStop(data[n - 1]),
+        .code93 => n >= 1 and n <= 255 and allIn(data, isAscii),
+        .code128 => n >= 1 and n + code128Prefix(kind, data).len <= 255 and
+            (if (code128Prefix(kind, data).len == 0) allIn(data, isAscii) else allIn(data, isPrintable)),
+    };
+    if (!ok) return error.InvalidBarcode;
+}
+
+fn code128Prefix(kind: BarcodeType, data: []const u8) []const u8 {
+    return if (kind == .code128 and data.len > 0 and data[0] != '{') "{B" else "";
+}
+
+fn allDigits(data: []const u8) bool {
+    return allIn(data, std.ascii.isDigit);
+}
+
+fn allIn(data: []const u8, comptime pred: fn (u8) bool) bool {
+    for (data) |c| if (!pred(c)) return false;
+    return true;
+}
+
+fn isAscii(c: u8) bool {
+    return c < 128;
+}
+
+fn isPrintable(c: u8) bool {
+    return c >= 32 and c < 128;
+}
+
+fn isCode39(c: u8) bool {
+    return std.ascii.isDigit(c) or std.ascii.isUpper(c) or std.mem.indexOfScalar(u8, " $%+-./*", c) != null;
+}
+
+fn isCodabarStop(c: u8) bool {
+    return (c >= 'A' and c <= 'D') or (c >= 'a' and c <= 'd');
+}
+
+fn isCodabar(c: u8) bool {
+    return std.ascii.isDigit(c) or isCodabarStop(c) or std.mem.indexOfScalar(u8, "$+-./:", c) != null;
+}
 
 fn expectBytes(expected: []const u8, comptime f: anytype, args: anytype) !void {
     var buf: [256]u8 = undefined;
@@ -211,4 +327,57 @@ test "qr code" {
     try Printer.init(&w).qrCode("hi", 4);
     // store-data length is len + 3 = 5
     try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "\x1d(k\x05\x001P0hi") != null);
+}
+
+test "barcode ean13" {
+    var buf: [64]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    try Printer.init(&w).barcode(.ean13, "4006381333931", .{ .height = 100, .module_width = 3 });
+    try std.testing.expectEqualSlices(
+        u8,
+        "\x1dh\x64\x1dw\x03\x1dH\x02\x1df\x00\x1dkC\x0d4006381333931",
+        w.buffered(),
+    );
+}
+
+test "barcode code128 selects code set B unless given" {
+    var buf: [64]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    try Printer.init(&w).barcode(.code128, "ABC-1", .{});
+    try std.testing.expect(std.mem.endsWith(u8, w.buffered(), "\x1dkI\x07{BABC-1"));
+
+    w = .fixed(&buf);
+    try Printer.init(&w).barcode(.code128, "{C\x12\x34", .{});
+    try std.testing.expect(std.mem.endsWith(u8, w.buffered(), "\x1dkI\x04{C\x12\x34"));
+}
+
+test "barcode options are clamped" {
+    var buf: [64]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    try Printer.init(&w).barcode(.code39, "A", .{ .height = 0, .module_width = 9, .text = .none });
+    try std.testing.expect(std.mem.startsWith(u8, w.buffered(), "\x1dh\x01\x1dw\x06\x1dH\x00"));
+}
+
+test "invalid barcodes write nothing" {
+    var buf: [64]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    const p = Printer.init(&w);
+    try std.testing.expectError(error.InvalidBarcode, p.barcode(.ean13, "123", .{}));
+    try std.testing.expectError(error.InvalidBarcode, p.barcode(.ean13, "40063813339ab", .{}));
+    try std.testing.expectError(error.InvalidBarcode, p.barcode(.itf, "123", .{}));
+    try std.testing.expectError(error.InvalidBarcode, p.barcode(.code39, "abc", .{}));
+    try std.testing.expectError(error.InvalidBarcode, p.barcode(.codabar, "1234", .{}));
+    try std.testing.expectError(error.InvalidBarcode, p.barcode(.code128, "", .{}));
+    try std.testing.expectError(error.InvalidBarcode, p.barcode(.code128, "caf\xe9", .{}));
+    try std.testing.expectEqual(0, w.buffered().len);
+}
+
+test "valid barcodes" {
+    try validateBarcode(.upca, "03600029145");
+    try validateBarcode(.upce, "012345");
+    try validateBarcode(.ean8, "9638507");
+    try validateBarcode(.code39, "*HELLO-123*");
+    try validateBarcode(.itf, "1234567890");
+    try validateBarcode(.codabar, "A1234B");
+    try validateBarcode(.code93, "Hello");
 }
