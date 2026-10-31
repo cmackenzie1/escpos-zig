@@ -22,6 +22,8 @@ other ESC/POS compatible printers (Epson TM-T88, TM-T20, and many generic
 - Line and character spacing, left margin, print width, absolute and relative
   positioning, 90-degree and upside-down text
 - Two-column receipt lines, divider rules, and code page selection
+- UTF-8 text converted to PC437, PC858 (with euro) or WPC1252, so accents and
+  currency symbols print correctly
 - QR codes (GS `(` `k`, model 2) with selectable size and error correction
 - PDF417 with configurable columns, rows, module size and error correction
 - 1D barcodes: UPC-A, UPC-E, EAN-13, EAN-8, Code 39, ITF, Codabar, Code 93 and
@@ -101,6 +103,7 @@ no libusb is needed. You may need to join the `lp` group to access it.
 escpos "Hello, world"
 echo "From stdin" | escpos
 escpos -a center -b -s 2 "RECEIPT"
+escpos "Café €4,50"                              # UTF-8 is converted to PC858
 escpos --left-margin 96 --char-spacing 2 --line-spacing 40 "Spaced out"
 escpos --qr https://example.com "Scan me"
 escpos --qr https://example.com --qr-level h --qr-size 8 "High-redundancy QR"

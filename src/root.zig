@@ -10,6 +10,10 @@ const Io = std.Io;
 /// Image loading, scaling and 1-bit conversion for `Printer.bitmap`.
 pub const image = @import("image.zig");
 
+/// UTF-8 to printer code page conversion tables.
+pub const encoding = @import("encoding.zig");
+pub const Encoding = encoding.Encoding;
+
 /// ESC control byte, the prefix of most ESC/POS commands.
 pub const esc = 0x1b;
 /// GS control byte, the prefix of ESC/POS extended commands.
@@ -243,6 +247,40 @@ pub const Printer = struct {
             .partial => 66,
         };
         try self.writer.writeAll(&.{ gs, 'V', m, 3 });
+    }
+
+    /// ESC t - select the code page for bytes 0x80-0xFF. Pair with
+    /// `textUtf8` using the same `enc`.
+    pub fn setEncoding(self: Printer, enc: Encoding) Io.Writer.Error!void {
+        try self.setCodePage(enc.codePage());
+    }
+
+    /// Write UTF-8 text converted to the code page `enc`, which must already
+    /// be selected with `setEncoding`. Invalid UTF-8 and characters the code
+    /// page lacks are written as `?`.
+    pub fn textUtf8(self: Printer, enc: Encoding, s: []const u8) Io.Writer.Error!void {
+        var i: usize = 0;
+        while (i < s.len) {
+            // An invalid lead byte or truncated sequence consumes one byte.
+            var len: usize = 1;
+            var out: u8 = encoding.replacement;
+            if (std.unicode.utf8ByteSequenceLength(s[i])) |n| {
+                if (i + n <= s.len) {
+                    if (std.unicode.utf8Decode(s[i..][0..n])) |cp| {
+                        len = n;
+                        out = enc.encode(cp) orelse encoding.replacement;
+                    } else |_| {}
+                }
+            } else |_| {}
+            try self.writer.writeByte(out);
+            i += len;
+        }
+    }
+
+    /// `textUtf8` followed by a line feed.
+    pub fn lineUtf8(self: Printer, enc: Encoding, s: []const u8) Io.Writer.Error!void {
+        try self.textUtf8(enc, s);
+        try self.writer.writeByte(lf);
     }
 
     /// ESC 3 - set line spacing in dots (about 1/203 inch). The power-on
@@ -603,4 +641,25 @@ test "margins and positions are little-endian" {
 test "rotation" {
     try expectBytes("\x1bV\x01", Printer.setRotate90, .{true});
     try expectBytes("\x1b{\x00", Printer.setUpsideDown, .{false});
+}
+
+test "setEncoding selects the Epson code page" {
+    try expectBytes("\x1bt\x13", Printer.setEncoding, .{Encoding.cp858});
+    try expectBytes("\x1bt\x10", Printer.setEncoding, .{Encoding.cp1252});
+}
+
+test "textUtf8 converts to the code page" {
+    try expectBytes("caf\x82 \xd5", Printer.textUtf8, .{ Encoding.cp858, "caf\xc3\xa9 \xe2\x82\xac" });
+    try expectBytes("caf\xe9", Printer.textUtf8, .{ Encoding.cp1252, "caf\xc3\xa9" });
+}
+
+test "textUtf8 replaces unmappable and invalid input" {
+    // CJK is missing from the code page; 0xff and a truncated sequence are invalid UTF-8
+    try expectBytes("?", Printer.textUtf8, .{ Encoding.cp437, "\xe4\xb8\xad" });
+    try expectBytes("a?b", Printer.textUtf8, .{ Encoding.cp437, "a\xffb" });
+    try expectBytes("a?", Printer.textUtf8, .{ Encoding.cp437, "a\xc3" });
+}
+
+test {
+    _ = encoding;
 }
