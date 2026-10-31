@@ -5,6 +5,8 @@ Epson's ESC/POS protocol for thermal receipt printers. It lets you generate and
 print documents with text formatting, QR codes, and paper cutting from Zig, or
 print straight from your shell with the bundled `escpos` binary.
 
+![A receipt printed by the escpos demo](static/demo.jpeg)
+
 It is tested against the Epson TM-T20III (USB `04b8:0e28`) and should work with
 other ESC/POS compatible printers (Epson TM-T88, TM-T20, and many generic
 58mm/80mm USB receipt printers).
