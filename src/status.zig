@@ -36,8 +36,10 @@ pub const ParseError = error{
 pub const Status = struct {
     /// DLE EOT 1: the printer is offline and won't accept print data.
     offline: bool,
-    /// DLE EOT 1: a cash drawer is connected and its sense pin reads high.
-    drawer_open: bool,
+    /// DLE EOT 1: drawer kick-out connector pin 3 reads HIGH. This is the raw
+    /// pin level, not "drawer open": what HIGH means depends on how the drawer
+    /// is wired, and it is HIGH with no drawer attached. `ready` ignores it.
+    drawer_pin_high: bool,
     /// DLE EOT 1: the printer is waiting for an operator to clear a condition.
     waiting_for_online: bool,
     /// DLE EOT 1: the paper feed button is being pressed.
@@ -81,7 +83,7 @@ fn check(byte: u8) ParseError!void {
 pub fn parse(printer: u8, offline_cause: u8, error_cause: u8, paper: u8) ParseError!Status {
     inline for (.{ printer, offline_cause, error_cause, paper }) |b| try check(b);
     return .{
-        .drawer_open = printer & 0x04 != 0,
+        .drawer_pin_high = printer & 0x04 != 0,
         .offline = printer & 0x08 != 0,
         .waiting_for_online = printer & 0x20 != 0,
         .feed_button_pressed = printer & 0x40 != 0,
@@ -106,7 +108,7 @@ test "healthy printer is ready" {
 
 test "decodes each condition" {
     const s = try parse(0x12 | 0x08 | 0x04, 0x12 | 0x04, 0x12 | 0x08, 0x12 | 0x0c | 0x60);
-    try std.testing.expect(s.offline and s.drawer_open);
+    try std.testing.expect(s.offline and s.drawer_pin_high);
     try std.testing.expect(s.cover_open);
     try std.testing.expect(s.cutter_error);
     try std.testing.expect(s.paper_near_end and s.paper_end);
