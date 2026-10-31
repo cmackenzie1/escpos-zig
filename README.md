@@ -108,9 +108,11 @@ and [escpos-php](https://github.com/mike42/escpos-php) for PHP.
 The [ESC/POS command reference](https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/)
 documents the protocol.
 
-## Contributing
+## Disclaimer
 
-Pull requests are welcome. For major changes, please open an issue first
-to discuss what you would like to change.
+This project is provided as is, without warranty of any kind. It was built
+with the assistance of an LLM, so review the code before relying on it,
+especially before pointing it at hardware.
 
-Please make sure to update tests as appropriate (`zig build test`).
+I offer no support. If you find this useful, I encourage you to fork it and
+make it your own.
