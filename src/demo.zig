@@ -73,7 +73,12 @@ pub fn print(p: escpos.Printer) (escpos.BarcodeError || escpos.BitmapError || st
 
     // QR code
     try p.line("Scan for the source:");
-    try p.qrCode("https://ziglang.org", 6);
+    try p.qrCodeWith("https://ziglang.org", .{ .module_size = 6, .error_correction = .q });
+    try p.feed(1);
+
+    // PDF417
+    try p.line("PDF417:");
+    try p.pdf417("ESC/POS from Zig", .{ .columns = 4 });
     try p.feed(1);
 
     // Raster image: a generated gradient, dithered to 1 bit.

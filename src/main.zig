@@ -19,6 +19,10 @@ const usage =
     \\  -n, --feed <n>        Blank lines to feed before cutting (default: 3)
     \\      --no-cut          Do not cut the paper
     \\      --qr <data>       Print a QR code after the text
+    \\      --qr-size <n>     QR module size in dots, 1-16 (default: 6)
+    \\      --qr-level <l>    QR error correction: l | m | q | h (default: m)
+    \\      --pdf417 <data>   Print a PDF417 symbol after the text
+    \\      --pdf417-columns <n>  PDF417 data columns, 1-30 (default: auto)
     \\      --barcode <data>  Print a 1D barcode after the text
     \\      --barcode-type <t>    upca | upce | ean13 | ean8 | code39 | itf |
     \\                            codabar | code93 | code128 (default: code128)
@@ -59,6 +63,9 @@ pub fn main(init: std.process.Init) !void {
     var to_stdout = false;
     var run_demo = false;
     var qr: ?[]const u8 = null;
+    var qr_opts: escpos.QrOptions = .{};
+    var pdf417: ?[]const u8 = null;
+    var pdf417_opts: escpos.Pdf417Options = .{};
     var image_path: ?[]const u8 = null;
     var image_width: ?u32 = null;
     var image_dither = true;
@@ -94,6 +101,19 @@ pub fn main(init: std.process.Init) !void {
             cut = false;
         } else if (eql(a, "--qr")) {
             qr = try value(args, &i, err);
+        } else if (eql(a, "--qr-size")) {
+            const v = try value(args, &i, err);
+            qr_opts.module_size = std.fmt.parseInt(u8, v, 10) catch return fail(err, "invalid QR size: {s}", .{v});
+            if (qr_opts.module_size < 1 or qr_opts.module_size > 16) return fail(err, "QR size must be 1-16", .{});
+        } else if (eql(a, "--qr-level")) {
+            const v = try value(args, &i, err);
+            qr_opts.error_correction = std.meta.stringToEnum(escpos.QrErrorCorrection, v) orelse return fail(err, "invalid QR level: {s}", .{v});
+        } else if (eql(a, "--pdf417")) {
+            pdf417 = try value(args, &i, err);
+        } else if (eql(a, "--pdf417-columns")) {
+            const v = try value(args, &i, err);
+            pdf417_opts.columns = std.fmt.parseInt(u8, v, 10) catch return fail(err, "invalid PDF417 columns: {s}", .{v});
+            if (pdf417_opts.columns > 30) return fail(err, "PDF417 columns must be 1-30", .{});
         } else if (eql(a, "--barcode")) {
             barcode = try value(args, &i, err);
         } else if (eql(a, "--barcode-type")) {
@@ -134,6 +154,8 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
+    if (qr) |data| if (data.len == 0 or data.len > 7089) return fail(err, "QR data must be 1-7089 bytes", .{});
+    if (pdf417) |data| if (data.len == 0) return fail(err, "PDF417 data must not be empty", .{});
     if (barcode) |data| escpos.validateBarcode(barcode_type, data) catch
         return fail(err, "invalid data for barcode type {s}: {s}", .{ @tagName(barcode_type), data });
 
@@ -193,7 +215,12 @@ pub fn main(init: std.process.Init) !void {
     try p.setUnderline(.none);
     if (qr) |data| {
         try p.setAlign(.center);
-        try p.qrCode(data, 6);
+        try p.qrCodeWith(data, qr_opts);
+        try p.text("\n");
+    }
+    if (pdf417) |data| {
+        try p.setAlign(.center);
+        try p.pdf417(data, pdf417_opts);
         try p.text("\n");
     }
     if (barcode) |data| {
