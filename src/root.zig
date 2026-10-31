@@ -12,6 +12,7 @@ pub const image = @import("image.zig");
 
 /// UTF-8 to printer code page conversion tables.
 pub const encoding = @import("encoding.zig");
+pub const emoji = @import("emoji.zig");
 
 /// Real-time status decoding for `Printer.queryStatus`.
 pub const status = @import("status.zig");
@@ -307,11 +308,19 @@ pub const Printer = struct {
     }
 
     /// Write UTF-8 text converted to the code page `enc`, which must already
-    /// be selected with `setEncoding`. Invalid UTF-8 and characters the code
-    /// page lacks are written as `?`.
+    /// be selected with `setEncoding`. Emoji and `:shortcodes:` that have an
+    /// ASCII stand-in (see `emoji.zig`) are written as that. Invalid UTF-8 and
+    /// other characters the code page lacks are written as `?`.
     pub fn textUtf8(self: Printer, enc: Encoding, s: []const u8) Io.Writer.Error!void {
         var i: usize = 0;
         while (i < s.len) {
+            if (s[i] == ':') {
+                if (emoji.shortcode(s[i..])) |sc| {
+                    try self.writer.writeAll(sc.text);
+                    i += sc.len;
+                    continue;
+                }
+            }
             // An invalid lead byte or truncated sequence consumes one byte.
             var len: usize = 1;
             var out: u8 = encoding.replacement;
@@ -319,7 +328,16 @@ pub const Printer = struct {
                 if (i + n <= s.len) {
                     if (std.unicode.utf8Decode(s[i..][0..n])) |cp| {
                         len = n;
-                        out = enc.encode(cp) orelse encoding.replacement;
+                        if (enc.encode(cp)) |b| {
+                            out = b;
+                        } else if (emoji.isModifier(cp)) {
+                            i += len;
+                            continue;
+                        } else if (emoji.fromCodePoint(cp)) |stand_in| {
+                            try self.writer.writeAll(stand_in);
+                            i += len;
+                            continue;
+                        }
                     } else |_| {}
                 }
             } else |_| {}
@@ -711,8 +729,17 @@ test "textUtf8 replaces unmappable and invalid input" {
     try expectBytes("a?", Printer.textUtf8, .{ Encoding.cp437, "a\xc3" });
 }
 
+test "textUtf8 substitutes emoji and shortcodes" {
+    try expectBytes("I <3 you :D", Printer.textUtf8, .{ Encoding.cp437, "I \u{2764}\u{FE0F} you :smile:" });
+    try expectBytes("ok +1 [x]", Printer.textUtf8, .{ Encoding.cp437, "ok :+1: \u{2705}" });
+    try expectBytes("12:30:45 :nope:", Printer.textUtf8, .{ Encoding.cp437, "12:30:45 :nope:" });
+    // thumbs up with a skin tone, then an emoji with no stand-in
+    try expectBytes("+1?", Printer.textUtf8, .{ Encoding.cp437, "\u{1F44D}\u{1F3FD}\u{1F9A6}" });
+}
+
 test {
     _ = encoding;
+    _ = emoji;
 }
 
 test "requestStatus" {
