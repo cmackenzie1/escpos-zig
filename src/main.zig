@@ -35,7 +35,7 @@ const usage =
     \\      --barcode-height <n>  Bar height in dots, 1-255 (default: 80)
     \\      --barcode-width <n>   Narrowest bar width in dots, 2-6 (default: 2)
     \\      --barcode-text <t>    none | above | below | both (default: below)
-    \\      --image <path>    Print a Netpbm image (P4/P5/P6) before the text
+    \\      --image <path>    Print a PNG or Netpbm (P4/P5/P6) image before the text
     \\      --image-width <n> Scale the image to n dots wide (default: at most 576)
     \\      --image-mode <m>  dither | threshold (default: dither)
     \\      --demo            Print a sample receipt showing most features
@@ -197,8 +197,8 @@ pub fn main(init: std.process.Init) !void {
     const bitmap: ?escpos.image.Bitmap = if (image_path) |path| bmp: {
         const bytes = std.Io.Dir.cwd().readFileAlloc(io, path, arena, .limited(64 << 20)) catch |e|
             return fail(err, "cannot read {s}: {s}", .{ path, @errorName(e) });
-        var gray = escpos.image.parseNetpbm(arena, bytes) catch |e|
-            return fail(err, "cannot decode {s}: {s} (convert with e.g. `magick in.png out.pgm`)", .{ path, @errorName(e) });
+        var gray = escpos.image.decode(arena, bytes) catch |e|
+            return fail(err, "cannot decode {s}: {s} (PNG and Netpbm only; convert other formats with e.g. `magick in.jpg out.png`)", .{ path, @errorName(e) });
         const target = image_width orelse if (gray.width > max_image_width) max_image_width else gray.width;
         if (target != gray.width) gray = escpos.image.scale(arena, gray, target) catch |e|
             return fail(err, "cannot scale image: {s}", .{@errorName(e)});

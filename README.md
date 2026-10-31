@@ -28,7 +28,7 @@ other ESC/POS compatible printers (Epson TM-T88, TM-T20, and many generic
 - PDF417 with configurable columns, rows, module size and error correction
 - 1D barcodes: UPC-A, UPC-E, EAN-13, EAN-8, Code 39, ITF, Codabar, Code 93 and
   Code 128, with height, width and human-readable text placement
-- Raster images: load Netpbm (P4/P5/P6) files, scale to the paper width, and
+- Raster images: load PNG or Netpbm (P4/P5/P6) files, scale to the paper width, and
   reduce to 1 bit with Floyd-Steinberg dithering or a threshold
 - Paper cut (full or partial), line feed, and cash drawer pulse
 - Command-line tool: print text from arguments or stdin
@@ -111,7 +111,7 @@ escpos --qr https://example.com "Scan me"
 escpos --qr https://example.com --qr-level h --qr-size 8 "High-redundancy QR"
 escpos --pdf417 "TICKET-0042" --pdf417-columns 4
 escpos --barcode 4006381333931 --barcode-type ean13 "Item 42"
-escpos --image logo.pgm -a center "Welcome"      # convert first: magick logo.png logo.pgm
+escpos --image logo.png -a center "Welcome"      # PNG or Netpbm; convert JPEGs first
 escpos --demo                         # sample receipt using most features
 escpos --stdout "dump raw bytes" | xxd   # no printer needed
 ```
