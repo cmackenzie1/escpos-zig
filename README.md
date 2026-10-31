@@ -1,5 +1,7 @@
 # escpos-zig - ESC/POS library for Zig
 
+[![Docs](https://img.shields.io/badge/docs-API%20reference-blue)](https://cmackenzie1.github.io/escpos-zig/)
+
 escpos-zig is a Zig library and command-line tool that implements a subset of
 Epson's ESC/POS protocol for thermal receipt printers. It lets you generate and
 print documents with text formatting, QR codes, and paper cutting from Zig, or
