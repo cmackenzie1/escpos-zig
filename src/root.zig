@@ -7,6 +7,9 @@
 const std = @import("std");
 const Io = std.Io;
 
+/// Image loading, scaling and 1-bit conversion for `Printer.bitmap`.
+pub const image = @import("image.zig");
+
 /// ESC control byte, the prefix of most ESC/POS commands.
 pub const esc = 0x1b;
 /// GS control byte, the prefix of ESC/POS extended commands.
@@ -88,6 +91,12 @@ pub const BarcodeOptions = struct {
     text: BarcodeText = .below,
     /// Font of the human-readable text.
     font: Font = .a,
+};
+
+pub const BitmapError = error{
+    /// The bitmap is empty, too wide for the protocol, or its data is the
+    /// wrong length.
+    InvalidBitmap,
 };
 
 pub const BarcodeError = error{
@@ -220,6 +229,26 @@ pub const Printer = struct {
         try w.writeAll(data);
         // Print stored symbol
         try w.writeAll(&.{ gs, '(', 'k', 3, 0, 49, 81, 48 });
+    }
+
+    /// Print a 1-bit raster image (GS v 0). Alignment applies, and the image
+    /// is clipped by the printer if wider than the paper (576 dots on 80mm).
+    ///
+    /// Sent in bands of 256 rows so large images don't overflow the printer's
+    /// receive buffer. Nothing is written if `bmp` is invalid.
+    pub fn bitmap(self: Printer, bmp: image.Bitmap) (BitmapError || Io.Writer.Error)!void {
+        const stride = bmp.stride();
+        if (bmp.width == 0 or bmp.height == 0 or stride > std.math.maxInt(u16) or
+            bmp.data.len != stride * bmp.height) return error.InvalidBitmap;
+
+        const w = self.writer;
+        var row: usize = 0;
+        while (row < bmp.height) {
+            const n: u16 = @intCast(@min(256, bmp.height - row));
+            try w.writeAll(&.{ gs, 'v', '0', 0, @truncate(stride), @truncate(stride >> 8), @truncate(n), @truncate(n >> 8) });
+            try w.writeAll(bmp.data[row * stride ..][0 .. n * stride]);
+            row += n;
+        }
     }
 
     /// Print a 1D barcode (GS h, w, H, f, then GS k function B).
@@ -380,4 +409,30 @@ test "valid barcodes" {
     try validateBarcode(.itf, "1234567890");
     try validateBarcode(.codabar, "A1234B");
     try validateBarcode(.code93, "Hello");
+}
+
+test "bitmap bands" {
+    var data: [600]u8 = @splat(0xaa);
+    var buf: [1024]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    // 8 wide (1 byte per row), 600 rows -> bands of 256, 256, 88
+    try Printer.init(&w).bitmap(.{ .width = 8, .height = 600, .data = &data });
+    const out = w.buffered();
+    try std.testing.expectEqualSlices(u8, "\x1dv0\x00\x01\x00\x00\x01", out[0..8]);
+    try std.testing.expectEqual(8 + 256 + 8 + 256 + 8 + 88, out.len);
+    try std.testing.expectEqualSlices(u8, "\x1dv0\x00\x01\x00\x58\x00", out[out.len - 88 - 8 ..][0..8]);
+}
+
+test "invalid bitmap writes nothing" {
+    var buf: [16]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    const p = Printer.init(&w);
+    var short = [_]u8{0};
+    try std.testing.expectError(error.InvalidBitmap, p.bitmap(.{ .width = 8, .height = 2, .data = &short }));
+    try std.testing.expectError(error.InvalidBitmap, p.bitmap(.{ .width = 0, .height = 0, .data = short[0..0] }));
+    try std.testing.expectEqual(0, w.buffered().len);
+}
+
+test {
+    _ = image;
 }
