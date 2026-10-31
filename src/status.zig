@@ -2,6 +2,7 @@
 //! one byte, so this needs a connection you can read from, such as a USB
 //! device file opened read-write or a network socket.
 const std = @import("std");
+const Io = std.Io;
 
 /// The DLE control byte.
 pub const dle = 0x10;
@@ -74,6 +75,58 @@ pub const Status = struct {
     }
 };
 
+/// Write a short human-readable report, for example:
+///
+///     Printer is ready
+///       Online:      yes
+///       Paper:       ok
+///       Cover:       closed
+///       Errors:      none
+///       Drawer pin:  high
+pub fn writeSummary(st: Status, w: *Io.Writer) Io.Writer.Error!void {
+    try w.print("Printer is {s}\n", .{if (st.ready()) "ready" else "not ready"});
+
+    try w.writeAll("  Online:      ");
+    try w.writeAll(if (st.offline) "no" else "yes");
+    if (st.waiting_for_online) try w.writeAll(" (waiting for an operator)");
+    try w.writeByte('\n');
+
+    const paper = if (st.paper_end or st.stopped_paper_end) "out" else if (st.paper_near_end) "low" else "ok";
+    try w.print("  Paper:       {s}\n", .{paper});
+    try w.print("  Cover:       {s}\n", .{if (st.cover_open) "open" else "closed"});
+
+    try w.writeAll("  Errors:      ");
+    const errors = [_]struct { bool, []const u8 }{
+        .{ st.mechanical_error, "mechanical" },
+        .{ st.cutter_error, "cutter" },
+        .{ st.unrecoverable_error, "unrecoverable" },
+        .{ st.recoverable_error, "recoverable (such as head over-temperature)" },
+        .{ st.error_occurred and !(st.mechanical_error or st.cutter_error or st.unrecoverable_error or st.recoverable_error), "unspecified" },
+    };
+    var first = true;
+    for (errors) |e| {
+        if (!e[0]) continue;
+        if (!first) try w.writeAll(", ");
+        try w.writeAll(e[1]);
+        first = false;
+    }
+    if (first) try w.writeAll("none");
+    try w.writeByte('\n');
+
+    if (st.feed_button_pressed) try w.writeAll("  Feed button: pressed\n");
+    if (st.feeding_by_button) try w.writeAll("  Feeding:     paper is being fed by the button\n");
+    try w.print("  Drawer pin:  {s}\n", .{if (st.drawer_pin_high) "high" else "low"});
+}
+
+/// Write one JSON object with `ready` and every `Status` field as booleans.
+pub fn writeJson(st: Status, w: *Io.Writer) Io.Writer.Error!void {
+    try w.print("{{\"ready\":{}", .{st.ready()});
+    inline for (comptime std.meta.fieldNames(Status)) |name| {
+        try w.print(",\"{s}\":{}", .{ name, @field(st, name) });
+    }
+    try w.writeAll("}\n");
+}
+
 /// Check the fixed bits shared by every status reply: bit 7 and bit 0 clear,
 /// bit 4 and bit 1 set (`0xx1xx10`).
 fn check(byte: u8) ParseError!void {
@@ -120,4 +173,41 @@ test "rejects bytes without the fixed bits" {
     try std.testing.expectError(error.InvalidStatus, parse(0x00, 0x12, 0x12, 0x12));
     try std.testing.expectError(error.InvalidStatus, parse(0x12, 0x92, 0x12, 0x12));
     try std.testing.expectError(error.InvalidStatus, parse(0x12, 0x12, 0x13, 0x12));
+}
+
+test "summary of a healthy printer" {
+    var buf: [512]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    try writeSummary(try parse(0x16, 0x12, 0x12, 0x12), &w);
+    try std.testing.expectEqualStrings(
+        \\Printer is ready
+        \\  Online:      yes
+        \\  Paper:       ok
+        \\  Cover:       closed
+        \\  Errors:      none
+        \\  Drawer pin:  high
+        \\
+    , w.buffered());
+}
+
+test "summary lists problems" {
+    var buf: [512]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    // offline, cover open, cutter error, paper near end
+    try writeSummary(try parse(0x12 | 0x08, 0x12 | 0x04 | 0x40, 0x12 | 0x08, 0x12 | 0x0c), &w);
+    const out = w.buffered();
+    try std.testing.expect(std.mem.startsWith(u8, out, "Printer is not ready\n"));
+    try std.testing.expect(std.mem.indexOf(u8, out, "Online:      no\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "Paper:       low\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "Cover:       open\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "Errors:      cutter\n") != null);
+}
+
+test "json has ready and every field" {
+    var buf: [1024]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    try writeJson(try parse(0x12, 0x12, 0x12, 0x12 | 0x60), &w);
+    const out = w.buffered();
+    try std.testing.expect(std.mem.startsWith(u8, out, "{\"ready\":false,\"offline\":false,\"drawer_pin_high\":false"));
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"paper_end\":true}\n") != null);
 }

@@ -106,6 +106,7 @@ escpos "Hello, world"
 echo "From stdin" | escpos
 escpos -a center -b -s 2 "RECEIPT"
 escpos --status                                  # needs a readable device; exits 1 if not ready
+escpos --status --json                           # same, machine-readable
 escpos "Café €4,50"                              # UTF-8 is converted to PC858
 escpos --left-margin 96 --char-spacing 2 --line-spacing 40 "Spaced out"
 escpos --qr https://example.com "Scan me"
