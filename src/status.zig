@@ -16,8 +16,15 @@ pub const Kind = enum(u8) {
     paper = 4,
 };
 
-/// How many times an empty read is retried before reporting end of stream.
-pub const empty_read_retries = 3;
+/// How `Printer.queryStatusWith` waits for a reply.
+pub const QueryOptions = struct {
+    /// Times a reply read is retried after returning no data. Some printers
+    /// answer a read that arrives before the reply is ready with an empty
+    /// packet instead of making the read wait.
+    retries: usize = 100,
+    /// Pause between retries, in milliseconds.
+    wait_ms: u32 = 10,
+};
 
 pub const ParseError = error{
     /// The byte's fixed bits don't match a status reply, so it probably isn't

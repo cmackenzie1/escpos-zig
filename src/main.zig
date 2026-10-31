@@ -305,11 +305,11 @@ fn printStatus(io: Io, device: []const u8, err: *Io.Writer) !void {
     var in_buf: [16]u8 = undefined;
     var file_reader: Io.File.Reader = .initStreaming(file, io, &in_buf);
 
-    const st = escpos.Printer.init(&file_writer.interface).queryStatus(&file_reader.interface) catch |e|
+    const st = escpos.Printer.init(&file_writer.interface).queryStatus(io, &file_reader.interface) catch |e|
         return fail(err, "cannot read status from {s}: {s}{s}", .{
             device,
             @errorName(e),
-            if (e == error.EndOfStream) " (the printer sent no data; it may not support reads on this connection)" else "",
+            if (e == error.EndOfStream) " (no reply within about a second; it may not support reads on this connection)" else "",
         });
 
     var stdout_buf: [512]u8 = undefined;
