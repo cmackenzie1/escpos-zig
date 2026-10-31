@@ -21,6 +21,8 @@ const usage =
     \\      --char-spacing <n>    Extra dots after each character
     \\      --left-margin <n>     Left margin in dots
     \\      --upside-down     Print the text upside down
+    \\      --encoding <e>        Convert UTF-8 text to a code page: cp858 | cp437 |
+    \\                            cp1252 | raw (default: cp858; raw sends bytes as-is)
     \\      --no-cut          Do not cut the paper
     \\      --qr <data>       Print a QR code after the text
     \\      --qr-size <n>     QR module size in dots, 1-16 (default: 6)
@@ -67,6 +69,7 @@ pub fn main(init: std.process.Init) !void {
     var to_stdout = false;
     var run_demo = false;
     var qr: ?[]const u8 = null;
+    var encoding: ?escpos.Encoding = .cp858;
     var line_spacing: ?u8 = null;
     var char_spacing: u8 = 0;
     var left_margin: u16 = 0;
@@ -105,6 +108,10 @@ pub fn main(init: std.process.Init) !void {
         } else if (eql(a, "-n") or eql(a, "--feed")) {
             const v = try value(args, &i, err);
             feed = std.fmt.parseInt(u8, v, 10) catch return fail(err, "invalid feed: {s}", .{v});
+        } else if (eql(a, "--encoding")) {
+            const v = try value(args, &i, err);
+            encoding = if (eql(v, "raw")) null else std.meta.stringToEnum(escpos.Encoding, v) orelse
+                return fail(err, "invalid encoding: {s}", .{v});
         } else if (eql(a, "--line-spacing")) {
             const v = try value(args, &i, err);
             line_spacing = std.fmt.parseInt(u8, v, 10) catch return fail(err, "invalid line spacing: {s}", .{v});
@@ -231,7 +238,10 @@ pub fn main(init: std.process.Init) !void {
     if (char_spacing > 0) try p.setCharSpacing(char_spacing);
     if (upside_down) try p.setUpsideDown(true);
     try p.setSize(size, size);
-    try p.text(body);
+    if (encoding) |enc| {
+        try p.setEncoding(enc);
+        try p.textUtf8(enc, body);
+    } else try p.text(body);
     if (body.len == 0 or body[body.len - 1] != '\n') try p.text("\n");
     // Undo the text-only settings so the codes below print normally.
     if (upside_down) try p.setUpsideDown(false);

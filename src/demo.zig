@@ -17,8 +17,9 @@ const items = [_]Item{
 /// Print the demo receipt. The caller is responsible for flushing the writer.
 pub fn print(p: escpos.Printer) (escpos.BarcodeError || escpos.BitmapError || std.mem.Allocator.Error || Io.Writer.Error)!void {
     try p.initialize();
-    // WPC1252, so the accented e below prints correctly.
-    try p.setCodePage(16);
+    // PC858 has accents and the euro sign; text below is converted from UTF-8.
+    const enc: escpos.Encoding = .cp858;
+    try p.setEncoding(enc);
 
     // Header
     try p.setAlign(.center);
@@ -74,7 +75,7 @@ pub fn print(p: escpos.Printer) (escpos.BarcodeError || escpos.BitmapError || st
     try p.setAlign(.right);
     try p.line("Right aligned");
     try p.setAlign(.center);
-    try p.line("Centered caf\xe9 au lait");
+    try p.lineUtf8(enc, "Centered café au lait · €4,50");
     try p.feed(1);
 
     // QR code
