@@ -17,6 +17,10 @@ const usage =
     \\  -u, --underline       Underline text
     \\  -s, --size <n>        Character size multiplier, 1-8
     \\  -n, --feed <n>        Blank lines to feed before cutting (default: 3)
+    \\      --line-spacing <n>    Line spacing in dots (default: 30)
+    \\      --char-spacing <n>    Extra dots after each character
+    \\      --left-margin <n>     Left margin in dots
+    \\      --upside-down     Print the text upside down
     \\      --no-cut          Do not cut the paper
     \\      --qr <data>       Print a QR code after the text
     \\      --qr-size <n>     QR module size in dots, 1-16 (default: 6)
@@ -63,6 +67,10 @@ pub fn main(init: std.process.Init) !void {
     var to_stdout = false;
     var run_demo = false;
     var qr: ?[]const u8 = null;
+    var line_spacing: ?u8 = null;
+    var char_spacing: u8 = 0;
+    var left_margin: u16 = 0;
+    var upside_down = false;
     var qr_opts: escpos.QrOptions = .{};
     var pdf417: ?[]const u8 = null;
     var pdf417_opts: escpos.Pdf417Options = .{};
@@ -97,6 +105,17 @@ pub fn main(init: std.process.Init) !void {
         } else if (eql(a, "-n") or eql(a, "--feed")) {
             const v = try value(args, &i, err);
             feed = std.fmt.parseInt(u8, v, 10) catch return fail(err, "invalid feed: {s}", .{v});
+        } else if (eql(a, "--line-spacing")) {
+            const v = try value(args, &i, err);
+            line_spacing = std.fmt.parseInt(u8, v, 10) catch return fail(err, "invalid line spacing: {s}", .{v});
+        } else if (eql(a, "--char-spacing")) {
+            const v = try value(args, &i, err);
+            char_spacing = std.fmt.parseInt(u8, v, 10) catch return fail(err, "invalid character spacing: {s}", .{v});
+        } else if (eql(a, "--left-margin")) {
+            const v = try value(args, &i, err);
+            left_margin = std.fmt.parseInt(u16, v, 10) catch return fail(err, "invalid left margin: {s}", .{v});
+        } else if (eql(a, "--upside-down")) {
+            upside_down = true;
         } else if (eql(a, "--no-cut")) {
             cut = false;
         } else if (eql(a, "--qr")) {
@@ -206,10 +225,19 @@ pub fn main(init: std.process.Init) !void {
     try p.setAlign(alignment);
     try p.setBold(bold);
     if (underline) try p.setUnderline(.single);
+    if (left_margin > 0) try p.setLeftMargin(left_margin);
     if (bitmap) |bmp| try p.bitmap(bmp);
+    if (line_spacing) |dots| try p.setLineSpacing(dots);
+    if (char_spacing > 0) try p.setCharSpacing(char_spacing);
+    if (upside_down) try p.setUpsideDown(true);
     try p.setSize(size, size);
     try p.text(body);
     if (body.len == 0 or body[body.len - 1] != '\n') try p.text("\n");
+    // Undo the text-only settings so the codes below print normally.
+    if (upside_down) try p.setUpsideDown(false);
+    if (char_spacing > 0) try p.setCharSpacing(0);
+    if (line_spacing != null) try p.resetLineSpacing();
+    if (left_margin > 0) try p.setLeftMargin(0);
     try p.setSize(1, 1);
     try p.setBold(false);
     try p.setUnderline(.none);

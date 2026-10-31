@@ -19,6 +19,8 @@ other ESC/POS compatible printers (Epson TM-T88, TM-T20, and many generic
   file, a network socket (port 9100), or an in-memory buffer for testing
 - Text alignment (left, center, right), bold, underline, reverse, fonts A/B,
   and 1-8x character scaling
+- Line and character spacing, left margin, print width, absolute and relative
+  positioning, 90-degree and upside-down text
 - Two-column receipt lines, divider rules, and code page selection
 - QR codes (GS `(` `k`, model 2) with selectable size and error correction
 - PDF417 with configurable columns, rows, module size and error correction
@@ -99,6 +101,7 @@ no libusb is needed. You may need to join the `lp` group to access it.
 escpos "Hello, world"
 echo "From stdin" | escpos
 escpos -a center -b -s 2 "RECEIPT"
+escpos --left-margin 96 --char-spacing 2 --line-spacing 40 "Spaced out"
 escpos --qr https://example.com "Scan me"
 escpos --qr https://example.com --qr-level h --qr-size 8 "High-redundancy QR"
 escpos --pdf417 "TICKET-0042" --pdf417-columns 4
