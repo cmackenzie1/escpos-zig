@@ -16,6 +16,9 @@ pub const Kind = enum(u8) {
     paper = 4,
 };
 
+/// How many times an empty read is retried before reporting end of stream.
+pub const empty_read_retries = 3;
+
 pub const ParseError = error{
     /// The byte's fixed bits don't match a status reply, so it probably isn't
     /// one (for example, stale data on the connection).

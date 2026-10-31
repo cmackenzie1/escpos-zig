@@ -271,9 +271,23 @@ pub const Printer = struct {
         inline for (.{ status.Kind.printer, .offline_cause, .error_cause, .paper }, 0..) |kind, i| {
             try self.requestStatus(kind);
             try self.writer.flush();
-            replies[i] = try reader.takeByte();
+            replies[i] = try takeReply(reader);
         }
         return status.parse(replies[0], replies[1], replies[2], replies[3]);
+    }
+
+    /// Read one reply byte. A character device can complete a read with zero
+    /// bytes (Linux `usblp` does this for a stale empty packet), which `Io.Reader`
+    /// reports as end of stream. That isn't a real EOF here, so try again a few
+    /// times before giving up.
+    fn takeReply(reader: *Io.Reader) Io.Reader.Error!u8 {
+        var attempts: usize = 0;
+        while (true) : (attempts += 1) {
+            return reader.takeByte() catch |e| switch (e) {
+                error.EndOfStream => if (attempts < status.empty_read_retries) continue else e,
+                else => e,
+            };
+        }
     }
 
     /// ESC t - select the code page for bytes 0x80-0xFF. Pair with
@@ -702,6 +716,46 @@ test "queryStatus sends four requests and decodes the replies" {
     const s = try Printer.init(&w).queryStatus(&r);
     try std.testing.expectEqualSlices(u8, "\x10\x04\x01\x10\x04\x02\x10\x04\x03\x10\x04\x04", w.buffered());
     try std.testing.expect(s.cover_open and s.paper_end and !s.offline);
+}
+
+/// A reader that returns `empties` empty reads, then endless status bytes.
+const FlakyReader = struct {
+    interface: Io.Reader,
+    empties: usize,
+
+    fn init(buffer: []u8, empties: usize) FlakyReader {
+        return .{
+            .interface = .{ .vtable = &.{ .stream = stream }, .buffer = buffer, .seek = 0, .end = 0 },
+            .empties = empties,
+        };
+    }
+
+    fn stream(r: *Io.Reader, w: *Io.Writer, _: Io.Limit) Io.Reader.StreamError!usize {
+        const self: *FlakyReader = @fieldParentPtr("interface", r);
+        if (self.empties > 0) {
+            self.empties -= 1;
+            return error.EndOfStream;
+        }
+        try w.writeByte(0x12);
+        return 1;
+    }
+};
+
+test "queryStatus retries empty reads" {
+    var out: [16]u8 = undefined;
+    var w: Io.Writer = .fixed(&out);
+    var buf: [8]u8 = undefined;
+    var flaky: FlakyReader = .init(&buf, status.empty_read_retries);
+    const s = try Printer.init(&w).queryStatus(&flaky.interface);
+    try std.testing.expect(s.ready());
+}
+
+test "queryStatus gives up after too many empty reads" {
+    var out: [16]u8 = undefined;
+    var w: Io.Writer = .fixed(&out);
+    var buf: [8]u8 = undefined;
+    var flaky: FlakyReader = .init(&buf, status.empty_read_retries + 1);
+    try std.testing.expectError(error.EndOfStream, Printer.init(&w).queryStatus(&flaky.interface));
 }
 
 test "queryStatus fails when the printer stops answering" {
