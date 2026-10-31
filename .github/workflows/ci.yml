@@ -26,7 +26,7 @@ jobs:
           for target in x86_64-linux-musl aarch64-linux-musl arm-linux-musleabihf x86_64-macos aarch64-macos x86_64-windows; do
             zig build -Dtarget=$target -Doptimize=ReleaseSmall -p dist/$target --summary all
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: escpos
           path: dist/*/bin/*
