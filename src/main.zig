@@ -1,11 +1,11 @@
 const std = @import("std");
 const Io = std.Io;
 
-const thermal = @import("thermal");
+const escpos = @import("escpos");
 const demo = @import("demo.zig");
 
 const usage =
-    \\Usage: thermal [options] [text...]
+    \\Usage: escpos [options] [text...]
     \\
     \\Print text to an ESC/POS receipt printer (Epson TM-T20III).
     \\Text comes from the arguments, or from stdin if none are given.
@@ -38,7 +38,7 @@ pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(arena);
 
     var device: []const u8 = default_device;
-    var alignment: thermal.Align = .left;
+    var alignment: escpos.Align = .left;
     var bold = false;
     var underline = false;
     var size: u4 = 1;
@@ -60,7 +60,7 @@ pub fn main(init: std.process.Init) !void {
             device = try value(args, &i, err);
         } else if (eql(a, "-a") or eql(a, "--align")) {
             const v = try value(args, &i, err);
-            alignment = std.meta.stringToEnum(thermal.Align, v) orelse return fail(err, "invalid alignment: {s}", .{v});
+            alignment = std.meta.stringToEnum(escpos.Align, v) orelse return fail(err, "invalid alignment: {s}", .{v});
         } else if (eql(a, "-b") or eql(a, "--bold")) {
             bold = true;
         } else if (eql(a, "-u") or eql(a, "--underline")) {
@@ -107,7 +107,7 @@ pub fn main(init: std.process.Init) !void {
 
     var out_buf: [4096]u8 = undefined;
     var file_writer: Io.File.Writer = .init(file, io, &out_buf);
-    const p = thermal.Printer.init(&file_writer.interface);
+    const p = escpos.Printer.init(&file_writer.interface);
 
     if (run_demo) {
         try demo.print(p);
@@ -148,7 +148,7 @@ fn value(args: []const [:0]const u8, i: *usize, err: *Io.Writer) ![]const u8 {
 }
 
 fn fail(err: *Io.Writer, comptime fmt: []const u8, args: anytype) noreturn {
-    err.print("thermal: " ++ fmt ++ "\n", args) catch {};
+    err.print("escpos: " ++ fmt ++ "\n", args) catch {};
     err.flush() catch {};
     std.process.exit(1);
 }

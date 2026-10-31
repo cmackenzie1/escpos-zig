@@ -1,9 +1,9 @@
-# thermal - ESC/POS library for Zig
+# escpos-zig - ESC/POS library for Zig
 
-thermal is a Zig library and command-line tool that implements a subset of
+escpos-zig is a Zig library and command-line tool that implements a subset of
 Epson's ESC/POS protocol for thermal receipt printers. It lets you generate and
 print documents with text formatting, QR codes, and paper cutting from Zig, or
-print straight from your shell with the bundled `thermal` binary.
+print straight from your shell with the bundled `escpos` binary.
 
 It is tested against the Epson TM-T20III (USB `04b8:0e28`) and should work with
 other ESC/POS compatible printers (Epson TM-T88, TM-T20, and many generic
@@ -29,17 +29,17 @@ Requires Zig 0.17. Build the binary from source:
 
 ```bash
 zig build -Doptimize=ReleaseSafe
-# -> zig-out/bin/thermal
+# -> zig-out/bin/escpos
 ```
 
 To cross-compile a static binary for arm64 Linux (e.g. a Raspberry Pi):
 
 ```bash
 zig build -Dtarget=aarch64-linux-musl -Doptimize=ReleaseSmall -p zig-out-arm64
-# -> zig-out-arm64/bin/thermal
+# -> zig-out-arm64/bin/escpos
 ```
 
-To use the library, add it to your project and import the `thermal` module:
+To use the library, add it to your project and import the `escpos` module:
 
 ```bash
 zig fetch --save <path-or-url>
@@ -47,15 +47,15 @@ zig fetch --save <path-or-url>
 
 ```zig
 // build.zig
-const dep = b.dependency("thermal", .{ .target = target, .optimize = optimize });
-exe.root_module.addImport("thermal", dep.module("thermal"));
+const dep = b.dependency("escpos", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("escpos", dep.module("escpos"));
 ```
 
 ## Usage
 
 ```zig
 const std = @import("std");
-const thermal = @import("thermal");
+const escpos = @import("escpos");
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -66,7 +66,7 @@ pub fn main(init: std.process.Init) !void {
         io,
         &buf,
     );
-    const p = thermal.Printer.init(&file_writer.interface);
+    const p = escpos.Printer.init(&file_writer.interface);
 
     try p.initialize();
     try p.setAlign(.center);
@@ -74,7 +74,7 @@ pub fn main(init: std.process.Init) !void {
     try p.line("COFFEE SHOP");
     try p.setBold(false);
     try p.setAlign(.left);
-    try p.columns("Latte", "$4.50", thermal.columns_font_a);
+    try p.columns("Latte", "$4.50", escpos.columns_font_a);
     try p.cut(.partial);
 
     try file_writer.interface.flush();
@@ -87,15 +87,15 @@ The ESC/POS binary writes to the Linux `usblp` device (`/dev/usb/lp0` by default
 no libusb is needed. You may need to join the `lp` group to access it.
 
 ```bash
-thermal "Hello, world"
-echo "From stdin" | thermal
-thermal -a center -b -s 2 "RECEIPT"
-thermal --qr https://example.com "Scan me"
-thermal --demo                         # sample receipt using most features
-thermal --stdout "dump raw bytes" | xxd   # no printer needed
+escpos "Hello, world"
+echo "From stdin" | escpos
+escpos -a center -b -s 2 "RECEIPT"
+escpos --qr https://example.com "Scan me"
+escpos --demo                         # sample receipt using most features
+escpos --stdout "dump raw bytes" | xxd   # no printer needed
 ```
 
-Run `thermal --help` for all options.
+Run `escpos --help` for all options.
 
 ## Related projects
 

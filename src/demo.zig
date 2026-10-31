@@ -1,10 +1,10 @@
-//! Sample receipt that exercises most of the `thermal.Printer` API.
+//! Sample receipt that exercises most of the `escpos.Printer` API.
 const std = @import("std");
 const Io = std.Io;
 
-const thermal = @import("thermal");
+const escpos = @import("escpos");
 
-const width = thermal.columns_font_a;
+const width = escpos.columns_font_a;
 
 const Item = struct { name: []const u8, price_cents: u32 };
 
@@ -15,7 +15,7 @@ const items = [_]Item{
 };
 
 /// Print the demo receipt. The caller is responsible for flushing the writer.
-pub fn print(p: thermal.Printer) Io.Writer.Error!void {
+pub fn print(p: escpos.Printer) Io.Writer.Error!void {
     try p.initialize();
     // WPC1252, so the accented e below prints correctly.
     try p.setCodePage(16);
@@ -27,7 +27,7 @@ pub fn print(p: thermal.Printer) Io.Writer.Error!void {
     try p.line("ZIG CAFE");
     try p.setSize(1, 1);
     try p.setBold(false);
-    try p.line("123 Thermal Street");
+    try p.line("123 Receipt Street");
     try p.line("Open daily 7am - 7pm");
     try p.feed(1);
 
