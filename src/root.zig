@@ -93,6 +93,42 @@ pub const BarcodeOptions = struct {
     font: Font = .a,
 };
 
+/// QR code error correction level: how much damage a symbol can survive, at
+/// the cost of a denser symbol.
+pub const QrErrorCorrection = enum(u8) {
+    /// Recovers about 7% of the symbol.
+    l = 48,
+    /// Recovers about 15% (the default).
+    m = 49,
+    /// Recovers about 25%.
+    q = 50,
+    /// Recovers about 30%.
+    h = 51,
+};
+
+/// Appearance of a QR code.
+pub const QrOptions = struct {
+    /// Module (dot) size in dots, 1-16.
+    module_size: u8 = 6,
+    error_correction: QrErrorCorrection = .m,
+};
+
+/// Appearance of a PDF417 symbol.
+pub const Pdf417Options = struct {
+    /// Number of data columns, 1-30, or 0 to let the printer choose.
+    columns: u8 = 0,
+    /// Number of rows, 3-90, or 0 to let the printer choose.
+    rows: u8 = 0,
+    /// Width of the narrowest bar in dots, 2-8.
+    module_width: u8 = 3,
+    /// Row height as a multiple of the module width, 2-8.
+    row_height: u8 = 3,
+    /// Error correction level, 0-8. Higher survives more damage.
+    error_correction: u8 = 1,
+    /// Omit the right-hand row indicators for a narrower symbol.
+    truncated: bool = false,
+};
+
 pub const BitmapError = error{
     /// The bitmap is empty, too wide for the protocol, or its data is the
     /// wrong length.
@@ -214,21 +250,47 @@ pub const Printer = struct {
         try self.writer.writeAll(&.{ esc, 'p', 0, 25, 250 });
     }
 
-    /// Print a QR code (GS ( k, model 2).
-    pub fn qrCode(self: Printer, data: []const u8, module_size: u8) Io.Writer.Error!void {
+    /// Print a QR code (GS ( k, model 2) at error correction level M.
+    pub fn qrCode(self: Printer, data: []const u8, module_size: u8) (BarcodeError || Io.Writer.Error)!void {
+        try self.qrCodeWith(data, .{ .module_size = module_size });
+    }
+
+    /// Print a QR code (GS ( k, model 2). Nothing is written if `data` is
+    /// empty or longer than a QR code can hold (7089 bytes).
+    pub fn qrCodeWith(self: Printer, data: []const u8, opts: QrOptions) (BarcodeError || Io.Writer.Error)!void {
+        if (data.len == 0 or data.len > 7089) return error.InvalidBarcode;
         const w = self.writer;
         // Model 2
         try w.writeAll(&.{ gs, '(', 'k', 4, 0, 49, 65, 50, 0 });
         // Module size (1...16)
-        try w.writeAll(&.{ gs, '(', 'k', 3, 0, 49, 67, std.math.clamp(module_size, 1, 16) });
-        // Error correction level M
-        try w.writeAll(&.{ gs, '(', 'k', 3, 0, 49, 69, 49 });
-        // Store data
+        try w.writeAll(&.{ gs, '(', 'k', 3, 0, 49, 67, std.math.clamp(opts.module_size, 1, 16) });
+        // Error correction level
+        try w.writeAll(&.{ gs, '(', 'k', 3, 0, 49, 69, @backingInt(opts.error_correction) });
+        try self.storeAndPrint2d(49, data);
+    }
+
+    /// Print a PDF417 symbol (GS ( k, function group 48). Nothing is written
+    /// if `data` is empty or too long for the protocol.
+    pub fn pdf417(self: Printer, data: []const u8, opts: Pdf417Options) (BarcodeError || Io.Writer.Error)!void {
+        if (data.len == 0 or data.len > 65532) return error.InvalidBarcode;
+        const w = self.writer;
+        try w.writeAll(&.{ gs, '(', 'k', 3, 0, 48, 65, @min(opts.columns, 30) });
+        try w.writeAll(&.{ gs, '(', 'k', 3, 0, 48, 66, if (opts.rows == 0) 0 else std.math.clamp(opts.rows, 3, 90) });
+        try w.writeAll(&.{ gs, '(', 'k', 3, 0, 48, 67, std.math.clamp(opts.module_width, 2, 8) });
+        try w.writeAll(&.{ gs, '(', 'k', 3, 0, 48, 68, std.math.clamp(opts.row_height, 2, 8) });
+        try w.writeAll(&.{ gs, '(', 'k', 4, 0, 48, 69, 48, @as(u8, 48) + @min(opts.error_correction, 8) });
+        try w.writeAll(&.{ gs, '(', 'k', 3, 0, 48, 70, @intFromBool(opts.truncated) });
+        try self.storeAndPrint2d(48, data);
+    }
+
+    /// Store `data` in the symbol buffer for 2D code family `cn` (48 PDF417,
+    /// 49 QR) and print it.
+    fn storeAndPrint2d(self: Printer, cn: u8, data: []const u8) Io.Writer.Error!void {
+        const w = self.writer;
         const len: u16 = @intCast(data.len + 3);
-        try w.writeAll(&.{ gs, '(', 'k', @truncate(len), @truncate(len >> 8), 49, 80, 48 });
+        try w.writeAll(&.{ gs, '(', 'k', @truncate(len), @truncate(len >> 8), cn, 80, 48 });
         try w.writeAll(data);
-        // Print stored symbol
-        try w.writeAll(&.{ gs, '(', 'k', 3, 0, 49, 81, 48 });
+        try w.writeAll(&.{ gs, '(', 'k', 3, 0, cn, 81, 48 });
     }
 
     /// Print a 1-bit raster image (GS v 0). Alignment applies, and the image
@@ -435,4 +497,42 @@ test "invalid bitmap writes nothing" {
 
 test {
     _ = image;
+}
+
+test "qr code options" {
+    var buf: [128]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    try Printer.init(&w).qrCodeWith("hi", .{ .module_size = 20, .error_correction = .h });
+    const out = w.buffered();
+    // module size clamps to 16, EC level H is 51
+    try std.testing.expect(std.mem.indexOf(u8, out, "\x1d(k\x03\x001C\x10") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "\x1d(k\x03\x001E3") != null);
+}
+
+test "qr code rejects empty and oversized data" {
+    var buf: [16]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    const p = Printer.init(&w);
+    try std.testing.expectError(error.InvalidBarcode, p.qrCode("", 4));
+    const big: [7090]u8 = @splat('x');
+    try std.testing.expectError(error.InvalidBarcode, p.qrCodeWith(&big, .{}));
+    try std.testing.expectEqual(0, w.buffered().len);
+}
+
+test "pdf417" {
+    var buf: [128]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    try Printer.init(&w).pdf417("hi", .{ .columns = 40, .rows = 1, .module_width = 9, .error_correction = 12, .truncated = true });
+    try std.testing.expectEqualSlices(
+        u8,
+        "\x1d(k\x03\x000A\x1e" ++ // columns clamp to 30
+            "\x1d(k\x03\x000B\x03" ++ // rows clamp to 3
+            "\x1d(k\x03\x000C\x08" ++ // width clamp to 8
+            "\x1d(k\x03\x000D\x03" ++ // row height
+            "\x1d(k\x04\x000E08" ++ // EC level clamps to 8 -> '0' + 8
+            "\x1d(k\x03\x000F\x01" ++ // truncated
+            "\x1d(k\x05\x000P0hi" ++
+            "\x1d(k\x03\x000Q0",
+        w.buffered(),
+    );
 }

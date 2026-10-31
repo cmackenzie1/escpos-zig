@@ -20,7 +20,8 @@ other ESC/POS compatible printers (Epson TM-T88, TM-T20, and many generic
 - Text alignment (left, center, right), bold, underline, reverse, fonts A/B,
   and 1-8x character scaling
 - Two-column receipt lines, divider rules, and code page selection
-- QR codes (GS `(` `k`, model 2)
+- QR codes (GS `(` `k`, model 2) with selectable size and error correction
+- PDF417 with configurable columns, rows, module size and error correction
 - 1D barcodes: UPC-A, UPC-E, EAN-13, EAN-8, Code 39, ITF, Codabar, Code 93 and
   Code 128, with height, width and human-readable text placement
 - Raster images: load Netpbm (P4/P5/P6) files, scale to the paper width, and
@@ -29,7 +30,7 @@ other ESC/POS compatible printers (Epson TM-T88, TM-T20, and many generic
 - Command-line tool: print text from arguments or stdin
 - Zero dependencies, no libusb; cross-compiles to a static binary for arm64
   and other Linux targets
-- Not yet supported: PDF417 and printer status queries
+- Not yet supported: printer status queries
 
 ## Installation
 
@@ -99,6 +100,8 @@ escpos "Hello, world"
 echo "From stdin" | escpos
 escpos -a center -b -s 2 "RECEIPT"
 escpos --qr https://example.com "Scan me"
+escpos --qr https://example.com --qr-level h --qr-size 8 "High-redundancy QR"
+escpos --pdf417 "TICKET-0042" --pdf417-columns 4
 escpos --barcode 4006381333931 --barcode-type ean13 "Item 42"
 escpos --image logo.pgm -a center "Welcome"      # convert first: magick logo.png logo.pgm
 escpos --demo                         # sample receipt using most features
