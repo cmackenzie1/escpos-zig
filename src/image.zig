@@ -31,6 +31,9 @@ pub const Bitmap = struct {
     }
 };
 
+/// PNG decoding.
+pub const png = @import("png.zig");
+
 pub const ParseError = error{
     /// Not a binary Netpbm file (P4, P5 or P6), or the header is malformed.
     InvalidNetpbm,
@@ -39,6 +42,16 @@ pub const ParseError = error{
     /// Zero-sized, or larger than `max_dimension`.
     InvalidSize,
 } || Allocator.Error;
+
+pub const DecodeError = ParseError || png.Error || error{UnknownFormat};
+
+/// Decode a PNG or binary Netpbm file by sniffing its first bytes. Caller
+/// owns the result.
+pub fn decode(allocator: Allocator, bytes: []const u8) DecodeError!Gray {
+    if (std.mem.startsWith(u8, bytes, png.signature)) return png.decode(allocator, bytes);
+    if (bytes.len >= 2 and bytes[0] == 'P') return parseNetpbm(allocator, bytes);
+    return error.UnknownFormat;
+}
 
 /// Largest accepted width or height, to keep allocations sane.
 pub const max_dimension = 1 << 14;
@@ -196,6 +209,18 @@ fn emptyBitmap(allocator: Allocator, src: Gray) Allocator.Error!Bitmap {
 
 fn setBlack(bmp: Bitmap, x: usize, y: usize) void {
     bmp.data[y * bmp.stride() + x / 8] |= @as(u8, 0x80) >> @intCast(x % 8);
+}
+
+test {
+    _ = png;
+}
+
+test "decode picks the format" {
+    const gpa = std.testing.allocator;
+    const img = try decode(gpa, "P5 1 1 255\n\x07");
+    defer img.deinit(gpa);
+    try std.testing.expectEqualSlices(u8, &.{7}, img.pixels);
+    try std.testing.expectError(error.UnknownFormat, decode(gpa, "GIF89a"));
 }
 
 test "parse P5 and P6" {
