@@ -118,3 +118,7 @@ especially before pointing it at hardware.
 
 I offer no support. If you find this useful, I encourage you to fork it and
 make it your own.
+
+## License
+
+[MIT](LICENSE)
