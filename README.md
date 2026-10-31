@@ -29,7 +29,8 @@ other ESC/POS compatible printers (Epson TM-T88, TM-T20, and many generic
 - 1D barcodes: UPC-A, UPC-E, EAN-13, EAN-8, Code 39, ITF, Codabar, Code 93 and
   Code 128, with height, width and human-readable text placement
 - Raster images: load PNG or Netpbm (P4/P5/P6) files, scale to the paper width, and
-  reduce to 1 bit with Floyd-Steinberg dithering or a threshold
+  reduce to 1 bit with Floyd-Steinberg dithering or a threshold, with automatic
+  contrast stretching and a gamma control for faint images
 - Paper cut (full or partial), line feed, and cash drawer pulse
 - Command-line tool: print text from arguments or stdin
 - Zero dependencies, no libusb; cross-compiles to a static binary for arm64
@@ -112,6 +113,7 @@ escpos --qr https://example.com --qr-level h --qr-size 8 "High-redundancy QR"
 escpos --pdf417 "TICKET-0042" --pdf417-columns 4
 escpos --barcode 4006381333931 --barcode-type ean13 "Item 42"
 escpos --image logo.png -a center "Welcome"      # PNG or Netpbm; convert JPEGs first
+escpos --image photo.png --image-gamma 1.6        # darker, if the print looks faint
 escpos --demo                         # sample receipt using most features
 escpos --stdout "dump raw bytes" | xxd   # no printer needed
 ```

@@ -37,6 +37,8 @@ const usage =
     \\      --barcode-text <t>    none | above | below | both (default: below)
     \\      --image <path>    Print a PNG or Netpbm (P4/P5/P6) image before the text
     \\      --image-width <n> Scale the image to n dots wide (default: at most 576)
+    \\      --image-gamma <g>     Darken (>1) or lighten (<1) midtones (default: 1)
+    \\      --no-autolevel        Don't stretch the image to full contrast
     \\      --image-mode <m>  dither | threshold (default: dither)
     \\      --demo            Print a sample receipt showing most features
     \\      --status          Query and print the printer's status; exit 1 if not ready
@@ -82,6 +84,8 @@ pub fn main(init: std.process.Init) !void {
     var image_path: ?[]const u8 = null;
     var image_width: ?u32 = null;
     var image_dither = true;
+    var image_gamma: f32 = 1;
+    var image_autolevel = true;
     var barcode: ?[]const u8 = null;
     var barcode_type: escpos.BarcodeType = .code128;
     var barcode_opts: escpos.BarcodeOptions = .{};
@@ -166,6 +170,12 @@ pub fn main(init: std.process.Init) !void {
             const v = try value(args, &i, err);
             image_width = std.fmt.parseInt(u32, v, 10) catch return fail(err, "invalid image width: {s}", .{v});
             if (image_width.? < 1) return fail(err, "image width must be at least 1", .{});
+        } else if (eql(a, "--image-gamma")) {
+            const v = try value(args, &i, err);
+            image_gamma = std.fmt.parseFloat(f32, v) catch return fail(err, "invalid image gamma: {s}", .{v});
+            if (!(image_gamma > 0 and image_gamma <= 10)) return fail(err, "image gamma must be between 0 and 10", .{});
+        } else if (eql(a, "--no-autolevel")) {
+            image_autolevel = false;
         } else if (eql(a, "--image-mode")) {
             const v = try value(args, &i, err);
             if (eql(v, "dither")) {
@@ -202,6 +212,8 @@ pub fn main(init: std.process.Init) !void {
         const target = image_width orelse if (gray.width > max_image_width) max_image_width else gray.width;
         if (target != gray.width) gray = escpos.image.scale(arena, gray, target) catch |e|
             return fail(err, "cannot scale image: {s}", .{@errorName(e)});
+        if (image_autolevel) escpos.image.autoLevels(gray);
+        escpos.image.adjustGamma(gray, image_gamma);
         break :bmp (if (image_dither)
             escpos.image.dither(arena, gray)
         else
