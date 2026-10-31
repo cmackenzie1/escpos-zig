@@ -245,6 +245,55 @@ pub const Printer = struct {
         try self.writer.writeAll(&.{ gs, 'V', m, 3 });
     }
 
+    /// ESC 3 - set line spacing in dots (about 1/203 inch). The power-on
+    /// default is 30 dots; `resetLineSpacing` restores it.
+    pub fn setLineSpacing(self: Printer, dots: u8) Io.Writer.Error!void {
+        try self.writer.writeAll(&.{ esc, '3', dots });
+    }
+
+    /// ESC 2 - restore the default line spacing.
+    pub fn resetLineSpacing(self: Printer) Io.Writer.Error!void {
+        try self.writer.writeAll(&.{ esc, '2' });
+    }
+
+    /// ESC SP - extra space in dots to the right of each character (0-255).
+    pub fn setCharSpacing(self: Printer, dots: u8) Io.Writer.Error!void {
+        try self.writer.writeAll(&.{ esc, ' ', dots });
+    }
+
+    /// GS L - left margin in dots. Takes effect at the start of a line.
+    pub fn setLeftMargin(self: Printer, dots: u16) Io.Writer.Error!void {
+        try self.writer.writeAll(&.{ gs, 'L', @truncate(dots), @truncate(dots >> 8) });
+    }
+
+    /// GS W - width of the print area in dots, measured from the left
+    /// margin. 576 is the full width of 80mm paper.
+    pub fn setPrintWidth(self: Printer, dots: u16) Io.Writer.Error!void {
+        try self.writer.writeAll(&.{ gs, 'W', @truncate(dots), @truncate(dots >> 8) });
+    }
+
+    /// ESC $ - move the print position to `dots` from the left margin.
+    pub fn setPosition(self: Printer, dots: u16) Io.Writer.Error!void {
+        try self.writer.writeAll(&.{ esc, '$', @truncate(dots), @truncate(dots >> 8) });
+    }
+
+    /// ESC \ - move the print position by `dots` (negative moves left).
+    pub fn movePosition(self: Printer, dots: i16) Io.Writer.Error!void {
+        const bits: u16 = @bitCast(dots);
+        try self.writer.writeAll(&.{ esc, '\\', @truncate(bits), @truncate(bits >> 8) });
+    }
+
+    /// ESC V - rotate text 90 degrees clockwise.
+    pub fn setRotate90(self: Printer, on: bool) Io.Writer.Error!void {
+        try self.writer.writeAll(&.{ esc, 'V', @intFromBool(on) });
+    }
+
+    /// ESC { - print text upside down (rotated 180 degrees). Takes effect at
+    /// the start of a line.
+    pub fn setUpsideDown(self: Printer, on: bool) Io.Writer.Error!void {
+        try self.writer.writeAll(&.{ esc, '{', @intFromBool(on) });
+    }
+
     /// ESC p - pulse the cash drawer connected to pin 2.
     pub fn openDrawer(self: Printer) Io.Writer.Error!void {
         try self.writer.writeAll(&.{ esc, 'p', 0, 25, 250 });
@@ -535,4 +584,23 @@ test "pdf417" {
             "\x1d(k\x03\x000Q0",
         w.buffered(),
     );
+}
+
+test "line and character spacing" {
+    try expectBytes("\x1b3\x14", Printer.setLineSpacing, .{20});
+    try expectBytes("\x1b2", Printer.resetLineSpacing, .{});
+    try expectBytes("\x1b \x03", Printer.setCharSpacing, .{3});
+}
+
+test "margins and positions are little-endian" {
+    try expectBytes("\x1dL\x40\x01", Printer.setLeftMargin, .{320});
+    try expectBytes("\x1dW\x40\x02", Printer.setPrintWidth, .{576});
+    try expectBytes("\x1b$\x2c\x01", Printer.setPosition, .{300});
+    try expectBytes("\x1b\\\xf6\xff", Printer.movePosition, .{-10});
+    try expectBytes("\x1b\\\x0a\x00", Printer.movePosition, .{10});
+}
+
+test "rotation" {
+    try expectBytes("\x1bV\x01", Printer.setRotate90, .{true});
+    try expectBytes("\x1b{\x00", Printer.setUpsideDown, .{false});
 }

@@ -65,6 +65,12 @@ pub fn print(p: escpos.Printer) (escpos.BarcodeError || escpos.BitmapError || st
     try p.setFont(.b);
     try p.line("Font B packs 64 columns into the same 80mm paper width.");
     try p.setFont(.a);
+    try p.setCharSpacing(4);
+    try p.line("Wide character spacing");
+    try p.setCharSpacing(0);
+    try p.setLeftMargin(96);
+    try p.line("Indented with a left margin");
+    try p.setLeftMargin(0);
     try p.setAlign(.right);
     try p.line("Right aligned");
     try p.setAlign(.center);
