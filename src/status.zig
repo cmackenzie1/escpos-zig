@@ -38,7 +38,8 @@ pub const Status = struct {
     offline: bool,
     /// DLE EOT 1: drawer kick-out connector pin 3 reads HIGH. This is the raw
     /// pin level, not "drawer open": what HIGH means depends on how the drawer
-    /// is wired, and it is HIGH with no drawer attached. `ready` ignores it.
+    /// is wired, and a printer with nothing attached may report either level.
+    /// `ready` ignores it.
     drawer_pin_high: bool,
     /// DLE EOT 1: the printer is waiting for an operator to clear a condition.
     waiting_for_online: bool,
