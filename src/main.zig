@@ -25,6 +25,9 @@ const usage =
     \\      --barcode-height <n>  Bar height in dots, 1-255 (default: 80)
     \\      --barcode-width <n>   Narrowest bar width in dots, 2-6 (default: 2)
     \\      --barcode-text <t>    none | above | below | both (default: below)
+    \\      --image <path>    Print a Netpbm image (P4/P5/P6) before the text
+    \\      --image-width <n> Scale the image to n dots wide (default: at most 576)
+    \\      --image-mode <m>  dither | threshold (default: dither)
     \\      --demo            Print a sample receipt showing most features
     \\      --stdout          Write raw ESC/POS bytes to stdout instead
     \\  -h, --help            Show this help
@@ -32,6 +35,9 @@ const usage =
 ;
 
 const default_device = "/dev/usb/lp0";
+
+/// Printable width in dots on 80mm paper.
+const max_image_width = 576;
 
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
@@ -53,6 +59,9 @@ pub fn main(init: std.process.Init) !void {
     var to_stdout = false;
     var run_demo = false;
     var qr: ?[]const u8 = null;
+    var image_path: ?[]const u8 = null;
+    var image_width: ?u32 = null;
+    var image_dither = true;
     var barcode: ?[]const u8 = null;
     var barcode_type: escpos.BarcodeType = .code128;
     var barcode_opts: escpos.BarcodeOptions = .{};
@@ -101,6 +110,19 @@ pub fn main(init: std.process.Init) !void {
         } else if (eql(a, "--barcode-text")) {
             const v = try value(args, &i, err);
             barcode_opts.text = std.meta.stringToEnum(escpos.BarcodeText, v) orelse return fail(err, "invalid barcode text: {s}", .{v});
+        } else if (eql(a, "--image")) {
+            image_path = try value(args, &i, err);
+        } else if (eql(a, "--image-width")) {
+            const v = try value(args, &i, err);
+            image_width = std.fmt.parseInt(u32, v, 10) catch return fail(err, "invalid image width: {s}", .{v});
+            if (image_width.? < 1) return fail(err, "image width must be at least 1", .{});
+        } else if (eql(a, "--image-mode")) {
+            const v = try value(args, &i, err);
+            if (eql(v, "dither")) {
+                image_dither = true;
+            } else if (eql(v, "threshold")) {
+                image_dither = false;
+            } else return fail(err, "invalid image mode: {s}", .{v});
         } else if (eql(a, "--demo")) {
             run_demo = true;
         } else if (eql(a, "--stdout")) {
@@ -114,6 +136,21 @@ pub fn main(init: std.process.Init) !void {
 
     if (barcode) |data| escpos.validateBarcode(barcode_type, data) catch
         return fail(err, "invalid data for barcode type {s}: {s}", .{ @tagName(barcode_type), data });
+
+    const bitmap: ?escpos.image.Bitmap = if (image_path) |path| bmp: {
+        const bytes = std.Io.Dir.cwd().readFileAlloc(io, path, arena, .limited(64 << 20)) catch |e|
+            return fail(err, "cannot read {s}: {s}", .{ path, @errorName(e) });
+        var gray = escpos.image.parseNetpbm(arena, bytes) catch |e|
+            return fail(err, "cannot decode {s}: {s} (convert with e.g. `magick in.png out.pgm`)", .{ path, @errorName(e) });
+        const target = image_width orelse if (gray.width > max_image_width) max_image_width else gray.width;
+        if (target != gray.width) gray = escpos.image.scale(arena, gray, target) catch |e|
+            return fail(err, "cannot scale image: {s}", .{@errorName(e)});
+        break :bmp (if (image_dither)
+            escpos.image.dither(arena, gray)
+        else
+            escpos.image.threshold(arena, gray, 128)) catch |e|
+            return fail(err, "cannot convert image: {s}", .{@errorName(e)});
+    } else null;
 
     // Gather the body before touching the printer.
     const body: []const u8 = if (run_demo)
@@ -147,6 +184,7 @@ pub fn main(init: std.process.Init) !void {
     try p.setAlign(alignment);
     try p.setBold(bold);
     if (underline) try p.setUnderline(.single);
+    if (bitmap) |bmp| try p.bitmap(bmp);
     try p.setSize(size, size);
     try p.text(body);
     if (body.len == 0 or body[body.len - 1] != '\n') try p.text("\n");

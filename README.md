@@ -23,11 +23,13 @@ other ESC/POS compatible printers (Epson TM-T88, TM-T20, and many generic
 - QR codes (GS `(` `k`, model 2)
 - 1D barcodes: UPC-A, UPC-E, EAN-13, EAN-8, Code 39, ITF, Codabar, Code 93 and
   Code 128, with height, width and human-readable text placement
+- Raster images: load Netpbm (P4/P5/P6) files, scale to the paper width, and
+  reduce to 1 bit with Floyd-Steinberg dithering or a threshold
 - Paper cut (full or partial), line feed, and cash drawer pulse
 - Command-line tool: print text from arguments or stdin
 - Zero dependencies, no libusb; cross-compiles to a static binary for arm64
   and other Linux targets
-- Not yet supported: raster images, PDF417, and printer status queries
+- Not yet supported: PDF417 and printer status queries
 
 ## Installation
 
@@ -98,6 +100,7 @@ echo "From stdin" | escpos
 escpos -a center -b -s 2 "RECEIPT"
 escpos --qr https://example.com "Scan me"
 escpos --barcode 4006381333931 --barcode-type ean13 "Item 42"
+escpos --image logo.pgm -a center "Welcome"      # convert first: magick logo.png logo.pgm
 escpos --demo                         # sample receipt using most features
 escpos --stdout "dump raw bytes" | xxd   # no printer needed
 ```

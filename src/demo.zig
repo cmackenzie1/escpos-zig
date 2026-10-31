@@ -15,7 +15,7 @@ const items = [_]Item{
 };
 
 /// Print the demo receipt. The caller is responsible for flushing the writer.
-pub fn print(p: escpos.Printer) (escpos.BarcodeError || Io.Writer.Error)!void {
+pub fn print(p: escpos.Printer) (escpos.BarcodeError || escpos.BitmapError || std.mem.Allocator.Error || Io.Writer.Error)!void {
     try p.initialize();
     // WPC1252, so the accented e below prints correctly.
     try p.setCodePage(16);
@@ -76,6 +76,11 @@ pub fn print(p: escpos.Printer) (escpos.BarcodeError || Io.Writer.Error)!void {
     try p.qrCode("https://ziglang.org", 6);
     try p.feed(1);
 
+    // Raster image: a generated gradient, dithered to 1 bit.
+    try p.line("Dithered gradient:");
+    try gradient(p);
+    try p.feed(1);
+
     // Barcodes
     try p.line("Order barcode:");
     try p.barcode(.code128, "ZIG-0042", .{});
@@ -89,6 +94,20 @@ pub fn print(p: escpos.Printer) (escpos.BarcodeError || Io.Writer.Error)!void {
     try p.setBold(false);
     try p.feed(3);
     try p.cut(.partial);
+}
+
+fn gradient(p: escpos.Printer) !void {
+    const w = 288;
+    const h = 32;
+    var mem: [w * h + w / 8 * h + (w + 2) * 2 * @sizeOf(i32)]u8 = undefined;
+    var fba: std.heap.FixedBufferAllocator = .init(&mem);
+    const a = fba.allocator();
+    const px = try a.alloc(u8, w * h);
+    for (0..h) |y| {
+        for (0..w) |x| px[y * w + x] = @intCast(x * 255 / (w - 1));
+    }
+    const bmp = try escpos.image.dither(a, .{ .width = w, .height = h, .pixels = px });
+    try p.bitmap(bmp);
 }
 
 fn money(buf: []u8, cents: u32) []const u8 {
