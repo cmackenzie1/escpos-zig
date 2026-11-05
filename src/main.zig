@@ -204,7 +204,7 @@ pub fn main(init: std.process.Init) !void {
     }
 
     if (qr) |data| if (data.len == 0 or data.len > 7089) return fail(err, "QR data must be 1-7089 bytes", .{});
-    if (pdf417) |data| if (data.len == 0) return fail(err, "PDF417 data must not be empty", .{});
+    if (pdf417) |data| if (data.len == 0 or data.len > 65532) return fail(err, "PDF417 data must be 1-65532 bytes", .{});
     if (barcode) |data| escpos.validateBarcode(barcode_type, data) catch
         return fail(err, "invalid data for barcode type {s}: {s}", .{ @tagName(barcode_type), data });
 
