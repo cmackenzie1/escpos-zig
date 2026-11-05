@@ -222,7 +222,8 @@ pub const Printer = struct {
         try self.writer.writeAll(&.{ esc, 'M', @backingInt(f) });
     }
 
-    /// GS ! n - character size multipliers, each 1...8.
+    /// GS ! n - character size multipliers, each 1...8. Values outside that
+    /// range are clamped, so 0 means 1 and 15 means 8.
     pub fn setSize(self: Printer, width: u4, height: u4) Io.Writer.Error!void {
         const w = std.math.clamp(width, 1, 8) - 1;
         const h = std.math.clamp(height, 1, 8) - 1;

@@ -147,11 +147,11 @@ pub fn scale(allocator: Allocator, src: Gray, new_width: u32) ParseError!Gray {
         for (0..new_width) |dx| {
             const x0 = dx * src.width / new_width;
             const x1 = @max(x0 + 1, (dx + 1) * src.width / new_width);
-            var sum: u32 = 0;
+            var sum: u64 = 0;
             for (y0..y1) |y| {
                 for (x0..x1) |x| sum += src.pixels[y * src.width + x];
             }
-            out[dy * new_width + dx] = @intCast(sum / @as(u32, @intCast((y1 - y0) * (x1 - x0))));
+            out[dy * new_width + dx] = @intCast(sum / ((y1 - y0) * (x1 - x0)));
         }
     }
     return .{ .width = new_width, .height = new_height, .pixels = out };
