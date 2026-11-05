@@ -259,7 +259,9 @@ pub const Printer = struct {
         try self.writer.writeAll(&.{ gs, '!', (@as(u8, w) << 4) | h });
     }
 
-    /// ESC t n - select code page (0 = PC437, 16 = WPC1252, ...).
+    /// ESC t n - select code page (0 = PC437, 16 = WPC1252, ...). Raw page
+    /// numbers are easy to mismatch with the bytes you send; `textUtf8` and
+    /// `lineUtf8` select the page themselves.
     pub fn setCodePage(self: Printer, page: u8) Io.Writer.Error!void {
         try self.writer.writeAll(&.{ esc, 't', page });
     }
@@ -337,14 +339,16 @@ pub const Printer = struct {
         }
     }
 
-    /// ESC t - select the code page for bytes 0x80-0xFF. Pair with
-    /// `textUtf8` using the same `enc`.
+    /// ESC t - select the code page for bytes 0x80-0xFF. Only needed before
+    /// `text`, `line` or `raw` bytes above 0x7F; `textUtf8` selects `enc`
+    /// itself.
     pub fn setEncoding(self: Printer, enc: Encoding) Io.Writer.Error!void {
         try self.setCodePage(enc.codePage());
     }
 
-    /// Write UTF-8 text converted to the code page `enc`, which must already
-    /// be selected with `setEncoding`. Emoji and `:shortcodes:` that have an
+    /// Write UTF-8 text converted to the code page `enc`, which this call also
+    /// selects (ESC t), so the output is correct whatever the printer was set
+    /// to before. Emoji and `:shortcodes:` that have an
     /// ASCII stand-in (see `emoji.zig`) are written as that. Typographic
     /// punctuation the code page lacks (curly quotes, dashes, `…`, non-breaking
     /// and other special spaces, bullets, `™`) falls back to ASCII (see
@@ -354,6 +358,9 @@ pub const Printer = struct {
     /// cannot inject printer commands; `text` and `line` write bytes verbatim.
     /// Invalid UTF-8 and other characters with no stand-in are written as `?`.
     pub fn textUtf8(self: Printer, enc: Encoding, s: []const u8) Io.Writer.Error!void {
+        // Select the code page every time so the bytes below can never be
+        // interpreted with a different one.
+        try self.setEncoding(enc);
         var i: usize = 0;
         while (i < s.len) {
             if (s[i] == ':') {
@@ -603,6 +610,16 @@ fn expectBytes(expected: []const u8, comptime f: anytype, args: anytype) !void {
     try std.testing.expectEqualSlices(u8, expected, w.buffered());
 }
 
+/// Check the output of `textUtf8`, which starts with the ESC t selecting `enc`.
+fn expectUtf8(enc: Encoding, expected: []const u8, input: []const u8) !void {
+    var buf: [256]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    try Printer.init(&w).textUtf8(enc, input);
+    var want: [256]u8 = undefined;
+    const out = try std.fmt.bufPrint(&want, "\x1bt{c}{s}", .{ enc.codePage(), expected });
+    try std.testing.expectEqualSlices(u8, out, w.buffered());
+}
+
 test "initialize" {
     try expectBytes("\x1b@", Printer.initialize, .{});
 }
@@ -777,23 +794,23 @@ test "setEncoding selects the Epson code page" {
 }
 
 test "textUtf8 converts to the code page" {
-    try expectBytes("caf\x82 \xd5", Printer.textUtf8, .{ Encoding.cp858, "caf\xc3\xa9 \xe2\x82\xac" });
-    try expectBytes("caf\xe9", Printer.textUtf8, .{ Encoding.cp1252, "caf\xc3\xa9" });
+    try expectUtf8(Encoding.cp858, "caf\x82 \xd5", "caf\xc3\xa9 \xe2\x82\xac");
+    try expectUtf8(Encoding.cp1252, "caf\xe9", "caf\xc3\xa9");
 }
 
 test "textUtf8 replaces unmappable and invalid input" {
     // CJK is missing from the code page; 0xff and a truncated sequence are invalid UTF-8
-    try expectBytes("?", Printer.textUtf8, .{ Encoding.cp437, "\xe4\xb8\xad" });
-    try expectBytes("a?b", Printer.textUtf8, .{ Encoding.cp437, "a\xffb" });
-    try expectBytes("a?", Printer.textUtf8, .{ Encoding.cp437, "a\xc3" });
+    try expectUtf8(Encoding.cp437, "?", "\xe4\xb8\xad");
+    try expectUtf8(Encoding.cp437, "a?b", "a\xffb");
+    try expectUtf8(Encoding.cp437, "a?", "a\xc3");
 }
 
 test "textUtf8 substitutes emoji and shortcodes" {
-    try expectBytes("I <3 you :D", Printer.textUtf8, .{ Encoding.cp437, "I \u{2764}\u{FE0F} you :smile:" });
-    try expectBytes("ok +1 [x]", Printer.textUtf8, .{ Encoding.cp437, "ok :+1: \u{2705}" });
-    try expectBytes("12:30:45 :nope:", Printer.textUtf8, .{ Encoding.cp437, "12:30:45 :nope:" });
+    try expectUtf8(Encoding.cp437, "I <3 you :D", "I \u{2764}\u{FE0F} you :smile:");
+    try expectUtf8(Encoding.cp437, "ok +1 [x]", "ok :+1: \u{2705}");
+    try expectUtf8(Encoding.cp437, "12:30:45 :nope:", "12:30:45 :nope:");
     // thumbs up with a skin tone, then an emoji with no stand-in
-    try expectBytes("+1?", Printer.textUtf8, .{ Encoding.cp437, "\u{1F44D}\u{1F3FD}\u{1F9A6}" });
+    try expectUtf8(Encoding.cp437, "+1?", "\u{1F44D}\u{1F3FD}\u{1F9A6}");
 }
 
 test "text, line, columns and rule neutralise control bytes" {
@@ -807,22 +824,22 @@ test "text, line, columns and rule neutralise control bytes" {
 }
 
 test "textUtf8 drops control bytes" {
-    try expectBytes("a\n\tb", Printer.textUtf8, .{ Encoding.cp858, "a\n\tb" });
-    try expectBytes("hidp", Printer.textUtf8, .{ Encoding.cp858, "hi\x1bdp\x00\x19" });
-    try expectBytes("aVpb", Printer.textUtf8, .{ Encoding.cp437, "a\x1dV\x00\x1bp\x00\x7fb" });
+    try expectUtf8(Encoding.cp858, "a\n\tb", "a\n\tb");
+    try expectUtf8(Encoding.cp858, "hidp", "hi\x1bdp\x00\x19");
+    try expectUtf8(Encoding.cp437, "aVpb", "a\x1dV\x00\x1bp\x00\x7fb");
 }
 
 test "textUtf8 falls back to ASCII punctuation" {
-    try expectBytes("it's", Printer.textUtf8, .{ Encoding.cp858, "it\u{2019}s" });
-    try expectBytes("\"x\"", Printer.textUtf8, .{ Encoding.cp858, "\u{201C}x\u{201D}" });
-    try expectBytes("a...b", Printer.textUtf8, .{ Encoding.cp858, "a\u{2026}b" });
-    try expectBytes("a b", Printer.textUtf8, .{ Encoding.cp858, "a\u{00A0}b" });
-    try expectBytes("a--b", Printer.textUtf8, .{ Encoding.cp858, "a\u{2014}b" });
-    try expectBytes("ab", Printer.textUtf8, .{ Encoding.cp858, "a\u{200B}b" });
+    try expectUtf8(Encoding.cp858, "it's", "it\u{2019}s");
+    try expectUtf8(Encoding.cp858, "\"x\"", "\u{201C}x\u{201D}");
+    try expectUtf8(Encoding.cp858, "a...b", "a\u{2026}b");
+    try expectUtf8(Encoding.cp858, "a b", "a\u{00A0}b");
+    try expectUtf8(Encoding.cp858, "a--b", "a\u{2014}b");
+    try expectUtf8(Encoding.cp858, "ab", "a\u{200B}b");
     // the code page wins when it has the character
-    try expectBytes("\x92", Printer.textUtf8, .{ Encoding.cp1252, "\u{2019}" });
+    try expectUtf8(Encoding.cp1252, "\x92", "\u{2019}");
     // CJK still becomes ?
-    try expectBytes("?", Printer.textUtf8, .{ Encoding.cp858, "\u{4E2D}" });
+    try expectUtf8(Encoding.cp858, "?", "\u{4E2D}");
 }
 
 test {
