@@ -174,22 +174,51 @@ pub const Printer = struct {
         try self.writer.writeAll(&.{ esc, '@' });
     }
 
-    /// Write text as-is (no trailing newline). Bytes are sent verbatim, so
-    /// control codes pass through; use `textUtf8` for untrusted input.
-    pub fn text(self: Printer, s: []const u8) Io.Writer.Error!void {
-        try self.writer.writeAll(s);
+    /// Write bytes to the printer exactly as given, with no filtering. Control
+    /// bytes such as ESC and GS are commands to the printer, so never pass
+    /// untrusted input; use `textUtf8` or `text` for that.
+    pub fn raw(self: Printer, bytes: []const u8) Io.Writer.Error!void {
+        try self.writer.writeAll(bytes);
     }
 
-    /// Write text followed by a line feed. Bytes are sent verbatim, so do not
-    /// pass untrusted input; use `lineUtf8`.
+    /// Write text that is already in the printer's current code page (no
+    /// trailing newline). Control bytes other than line feed and tab are
+    /// dropped so the text cannot inject printer commands. Bytes are not
+    /// converted: for UTF-8 use `textUtf8`, and for exact bytes use `raw`.
+    pub fn text(self: Printer, s: []const u8) Io.Writer.Error!void {
+        try self.writeFiltered(s, true);
+    }
+
+    /// `text` followed by a line feed.
     pub fn line(self: Printer, s: []const u8) Io.Writer.Error!void {
-        try self.writer.writeAll(s);
+        try self.writeFiltered(s, true);
         try self.writer.writeByte(lf);
     }
 
-    /// Write formatted text (no trailing newline added).
-    pub fn print(self: Printer, comptime fmt: []const u8, args: anytype) Io.Writer.Error!void {
-        try self.writer.print(fmt, args);
+    /// Write `s` without its control bytes. Line feed and tab are kept only
+    /// when `allow_whitespace` is set.
+    fn writeFiltered(self: Printer, s: []const u8, allow_whitespace: bool) Io.Writer.Error!void {
+        var start: usize = 0;
+        for (s, 0..) |c, i| {
+            if (!isDroppedByte(c, allow_whitespace)) continue;
+            try self.writer.writeAll(s[start..i]);
+            start = i + 1;
+        }
+        try self.writer.writeAll(s[start..]);
+    }
+
+    /// Number of bytes of `s` that `writeFiltered(s, false)` writes.
+    fn filteredLen(s: []const u8) usize {
+        var n: usize = 0;
+        for (s) |c| {
+            if (!isDroppedByte(c, false)) n += 1;
+        }
+        return n;
+    }
+
+    fn isDroppedByte(c: u8, allow_whitespace: bool) bool {
+        if (allow_whitespace and (c == '\n' or c == '\t')) return false;
+        return c < 0x20 or c == 0x7F;
     }
 
     /// Feed `n` blank lines.
@@ -235,19 +264,22 @@ pub const Printer = struct {
         try self.writer.writeAll(&.{ esc, 't', page });
     }
 
-    /// Print a line of `ch` spanning the full paper width.
+    /// Print a line of `ch` repeated `width` times. A control byte for `ch`
+    /// is replaced with `-`.
     pub fn rule(self: Printer, ch: u8, width: usize) Io.Writer.Error!void {
-        try self.writer.splatByteAll(ch, width);
+        try self.writer.splatByteAll(if (isDroppedByte(ch, false)) '-' else ch, width);
         try self.writer.writeByte(lf);
     }
 
     /// Print `left` and `right` on one line, padded to `width` columns.
-    /// If they do not fit, a single space separates them.
+    /// If they do not fit, a single space separates them. Both strings must
+    /// already be in the printer's code page, one byte per column; control
+    /// bytes (including line feed) are dropped.
     pub fn columns(self: Printer, left: []const u8, right: []const u8, width: usize) Io.Writer.Error!void {
-        try self.writer.writeAll(left);
-        const used = left.len + right.len;
+        try self.writeFiltered(left, false);
+        const used = filteredLen(left) + filteredLen(right);
         try self.writer.splatByteAll(' ', if (used < width) width - used else 1);
-        try self.writer.writeAll(right);
+        try self.writeFiltered(right, false);
         try self.writer.writeByte(lf);
     }
 
@@ -370,7 +402,7 @@ pub const Printer = struct {
     /// True for control characters that `textUtf8` drops: every C0 control
     /// and DEL except line feed and tab.
     fn isDroppedControl(cp: u21) bool {
-        return (cp < 0x20 and cp != '\n' and cp != '\t') or cp == 0x7F;
+        return cp < 0x80 and isDroppedByte(@intCast(cp), true);
     }
 
     /// `textUtf8` followed by a line feed.
@@ -762,6 +794,16 @@ test "textUtf8 substitutes emoji and shortcodes" {
     try expectBytes("12:30:45 :nope:", Printer.textUtf8, .{ Encoding.cp437, "12:30:45 :nope:" });
     // thumbs up with a skin tone, then an emoji with no stand-in
     try expectBytes("+1?", Printer.textUtf8, .{ Encoding.cp437, "\u{1F44D}\u{1F3FD}\u{1F9A6}" });
+}
+
+test "text, line, columns and rule neutralise control bytes" {
+    try expectBytes("hi\n\tp", Printer.text, .{"hi\n\t\x1bp\x00"});
+    try expectBytes("aVb\n", Printer.line, .{"a\x1dVb"});
+    try expectBytes("ab  c\n", Printer.columns, .{ "a\x1bb", "c\n", 5 });
+    try expectBytes("---\n", Printer.rule, .{ 0x1b, 3 });
+    try expectBytes("\x1bp", Printer.raw, .{"\x1bp"});
+    // high bytes are code page glyphs, not commands
+    try expectBytes("\x82\xff", Printer.text, .{"\x82\xff"});
 }
 
 test "textUtf8 drops control bytes" {

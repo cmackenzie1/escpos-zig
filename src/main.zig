@@ -266,7 +266,7 @@ pub fn main(init: std.process.Init) !void {
     if (encoding) |enc| {
         try p.setEncoding(enc);
         try p.textUtf8(enc, body);
-    } else try p.text(body);
+    } else try p.raw(body);
     if (body.len == 0 or body[body.len - 1] != '\n') try p.text("\n");
     // Undo the text-only settings so the codes below print normally.
     if (upside_down) try p.setUpsideDown(false);
