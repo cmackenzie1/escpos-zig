@@ -24,7 +24,11 @@ other ESC/POS compatible printers (Epson TM-T88, TM-T20, and many generic
 - Two-column receipt lines, divider rules, and code page selection
 - UTF-8 text converted to PC437, PC858 (with euro) or WPC1252, so accents and
   currency symbols print correctly; emoji and `:shortcode:`s print as ASCII
-  stand-ins (`:smile:` → `:D`, ❤️ → `<3`)
+  stand-ins (`:smile:` → `:D`, ❤️ → `<3`); typographic punctuation the
+  code page lacks falls back to ASCII (`’` → `'`, `“”` → `"`, `—` → `--`,
+  `…` → `...`, non-breaking space → space), and anything else unmappable
+  prints as `?`. Control bytes (ESC, GS, DLE, ...) other than newline and tab are
+  dropped, so untrusted text can't inject printer commands (raw mode doesn't)
 - QR codes (GS `(` `k`, model 2) with selectable size and error correction
 - PDF417 with configurable columns, rows, module size and error correction
 - 1D barcodes: UPC-A, UPC-E, EAN-13, EAN-8, Code 39, ITF, Codabar, Code 93 and

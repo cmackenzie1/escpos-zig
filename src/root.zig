@@ -13,6 +13,7 @@ pub const image = @import("image.zig");
 /// UTF-8 to printer code page conversion tables.
 pub const encoding = @import("encoding.zig");
 pub const emoji = @import("emoji.zig");
+pub const punctuation = @import("punctuation.zig");
 
 /// Real-time status decoding for `Printer.queryStatus`.
 pub const status = @import("status.zig");
@@ -173,12 +174,14 @@ pub const Printer = struct {
         try self.writer.writeAll(&.{ esc, '@' });
     }
 
-    /// Write text as-is (no trailing newline).
+    /// Write text as-is (no trailing newline). Bytes are sent verbatim, so
+    /// control codes pass through; use `textUtf8` for untrusted input.
     pub fn text(self: Printer, s: []const u8) Io.Writer.Error!void {
         try self.writer.writeAll(s);
     }
 
-    /// Write text followed by a line feed.
+    /// Write text followed by a line feed. Bytes are sent verbatim, so do not
+    /// pass untrusted input; use `lineUtf8`.
     pub fn line(self: Printer, s: []const u8) Io.Writer.Error!void {
         try self.writer.writeAll(s);
         try self.writer.writeByte(lf);
@@ -309,8 +312,14 @@ pub const Printer = struct {
 
     /// Write UTF-8 text converted to the code page `enc`, which must already
     /// be selected with `setEncoding`. Emoji and `:shortcodes:` that have an
-    /// ASCII stand-in (see `emoji.zig`) are written as that. Invalid UTF-8 and
-    /// other characters the code page lacks are written as `?`.
+    /// ASCII stand-in (see `emoji.zig`) are written as that. Typographic
+    /// punctuation the code page lacks (curly quotes, dashes, `…`, non-breaking
+    /// and other special spaces, bullets, `™`) falls back to ASCII (see
+    /// `punctuation.zig`); zero-width characters are dropped. Characters the
+    /// code page has are always written natively. Control characters other than
+    /// line feed and tab (ESC, GS, DLE, DEL, ...) are dropped so untrusted text
+    /// cannot inject printer commands; `text` and `line` write bytes verbatim.
+    /// Invalid UTF-8 and other characters with no stand-in are written as `?`.
     pub fn textUtf8(self: Printer, enc: Encoding, s: []const u8) Io.Writer.Error!void {
         var i: usize = 0;
         while (i < s.len) {
@@ -328,8 +337,19 @@ pub const Printer = struct {
                 if (i + n <= s.len) {
                     if (std.unicode.utf8Decode(s[i..][0..n])) |cp| {
                         len = n;
-                        if (enc.encode(cp)) |b| {
+                        if (isDroppedControl(cp)) {
+                            // Never let text carry ESC/GS/DLE... commands to the printer.
+                            i += len;
+                            continue;
+                        } else if (cp == 0xA0) {
+                            // Code pages map nbsp to a blank glyph; plain space is equivalent.
+                            out = ' ';
+                        } else if (enc.encode(cp)) |b| {
                             out = b;
+                        } else if (punctuation.fromCodePoint(cp)) |ascii| {
+                            try self.writer.writeAll(ascii);
+                            i += len;
+                            continue;
                         } else if (emoji.isModifier(cp)) {
                             i += len;
                             continue;
@@ -344,6 +364,12 @@ pub const Printer = struct {
             try self.writer.writeByte(out);
             i += len;
         }
+    }
+
+    /// True for control characters that `textUtf8` drops: every C0 control
+    /// and DEL except line feed and tab.
+    fn isDroppedControl(cp: u21) bool {
+        return (cp < 0x20 and cp != '\n' and cp != '\t') or cp == 0x7F;
     }
 
     /// `textUtf8` followed by a line feed.
@@ -737,9 +763,29 @@ test "textUtf8 substitutes emoji and shortcodes" {
     try expectBytes("+1?", Printer.textUtf8, .{ Encoding.cp437, "\u{1F44D}\u{1F3FD}\u{1F9A6}" });
 }
 
+test "textUtf8 drops control bytes" {
+    try expectBytes("a\n\tb", Printer.textUtf8, .{ Encoding.cp858, "a\n\tb" });
+    try expectBytes("hidp", Printer.textUtf8, .{ Encoding.cp858, "hi\x1bdp\x00\x19" });
+    try expectBytes("aVpb", Printer.textUtf8, .{ Encoding.cp437, "a\x1dV\x00\x1bp\x00\x7fb" });
+}
+
+test "textUtf8 falls back to ASCII punctuation" {
+    try expectBytes("it's", Printer.textUtf8, .{ Encoding.cp858, "it\u{2019}s" });
+    try expectBytes("\"x\"", Printer.textUtf8, .{ Encoding.cp858, "\u{201C}x\u{201D}" });
+    try expectBytes("a...b", Printer.textUtf8, .{ Encoding.cp858, "a\u{2026}b" });
+    try expectBytes("a b", Printer.textUtf8, .{ Encoding.cp858, "a\u{00A0}b" });
+    try expectBytes("a--b", Printer.textUtf8, .{ Encoding.cp858, "a\u{2014}b" });
+    try expectBytes("ab", Printer.textUtf8, .{ Encoding.cp858, "a\u{200B}b" });
+    // the code page wins when it has the character
+    try expectBytes("\x92", Printer.textUtf8, .{ Encoding.cp1252, "\u{2019}" });
+    // CJK still becomes ?
+    try expectBytes("?", Printer.textUtf8, .{ Encoding.cp858, "\u{4E2D}" });
+}
+
 test {
     _ = encoding;
     _ = emoji;
+    _ = punctuation;
 }
 
 test "requestStatus" {
