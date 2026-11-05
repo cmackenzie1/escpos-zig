@@ -1,3 +1,15 @@
+# escpos-zig 0.2.1
+
+Patch release; no breaking changes.
+
+## Changes
+
+- `textUtf8` now falls back to ASCII for the single guillemets `‹` (`<`) and
+  `›` (`>`), and for `©` (`(C)`) and `®` (`(R)`) on code pages that lack
+  them (CP437). CP1252 and CP858 still print the native glyphs.
+- Expanded punctuation tests covering primes, low/reverse quotes, bullets,
+  special spaces, `×`, `÷`, `·` and `™`.
+
 # escpos-zig 0.2.0
 
 Changes since 0.1.0. This release has **breaking changes**, all aimed at
