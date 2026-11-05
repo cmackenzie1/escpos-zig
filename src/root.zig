@@ -842,6 +842,24 @@ test "textUtf8 falls back to ASCII punctuation" {
     try expectUtf8(Encoding.cp858, "?", "\u{4E2D}");
 }
 
+test "textUtf8 single guillemets" {
+    try expectBytes("<x>", Printer.textUtf8, .{ Encoding.cp858, "\u{2039}x\u{203A}" });
+    try expectBytes("<x>", Printer.textUtf8, .{ Encoding.cp437, "\u{2039}x\u{203A}" });
+    try expectBytes("\x8Bx\x9B", Printer.textUtf8, .{ Encoding.cp1252, "\u{2039}x\u{203A}" });
+}
+
+test "textUtf8 symbols and marks" {
+    try expectBytes("(C)(R)(TM)", Printer.textUtf8, .{ Encoding.cp437, "\u{A9}\u{AE}\u{2122}" });
+    try expectBytes("\xB8\xA9(TM)", Printer.textUtf8, .{ Encoding.cp858, "\u{A9}\u{AE}\u{2122}" });
+    try expectBytes("\xA9\xAE\x99", Printer.textUtf8, .{ Encoding.cp1252, "\u{A9}\u{AE}\u{2122}" });
+    try expectBytes("2x3", Printer.textUtf8, .{ Encoding.cp437, "2\u{D7}3" });
+    try expectBytes("\xF6", Printer.textUtf8, .{ Encoding.cp437, "\u{F7}" });
+    try expectBytes("\xD7", Printer.textUtf8, .{ Encoding.cp1252, "\u{D7}" });
+    try expectBytes("'a' \"b'", Printer.textUtf8, .{ Encoding.cp437, "\u{201A}a\u{201B} \u{2033}b\u{2032}" });
+    try expectBytes("* * *", Printer.textUtf8, .{ Encoding.cp1252, "\u{2023} \u{25E6} \u{2219}" });
+    try expectBytes("a b c d", Printer.textUtf8, .{ Encoding.cp858, "a\u{2009}b\u{202F}c\u{3000}d" });
+}
+
 test {
     _ = encoding;
     _ = emoji;
